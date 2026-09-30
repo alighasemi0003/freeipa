@@ -88,9 +88,11 @@ class TestSessionIdleTimeout:
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)
         session_registry.register_web_session(
-            'MagBearerToken=idle-ok', 'user1@IPA.TEST', ccache)
+            'MagBearerToken=idle-ok', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.1', max_per_user=0)
         assert session_registry.session_allows_access(
-            ccache, idle_timeout=1800) is True
+            ccache, idle_timeout=1800, client_ip='203.0.113.1',
+            bind_ip=True) is True
         assert os.path.isfile(ccache)
         assert session_registry.is_session_revoked_for_ccache(ccache) is False
 
@@ -98,7 +100,8 @@ class TestSessionIdleTimeout:
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)
         sid = session_registry.register_web_session(
-            'MagBearerToken=idle-out', 'user1@IPA.TEST', ccache)
+            'MagBearerToken=idle-out', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.1', max_per_user=0)
         record = session_registry.get_session_by_id(sid)
         # Simulate last activity far in the past
         record['last_activity'] = int(time.time()) - 3600
@@ -115,23 +118,27 @@ class TestSessionIdleTimeout:
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)
         sid = session_registry.register_web_session(
-            'MagBearerToken=idle-deny', 'user1@IPA.TEST', ccache)
+            'MagBearerToken=idle-deny', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.1', max_per_user=0)
         record = session_registry.get_session_by_id(sid)
         record['last_activity'] = int(time.time()) - 7200
         session_registry._atomic_write(
             session_registry._path_for_id(sid), record)
 
         assert session_registry.session_allows_access(
-            ccache, idle_timeout=60) is False
+            ccache, idle_timeout=60, client_ip='203.0.113.1',
+            bind_ip=True) is False
         # Still denied on subsequent checks
         assert session_registry.session_allows_access(
-            ccache, idle_timeout=60) is False
+            ccache, idle_timeout=60, client_ip='203.0.113.1',
+            bind_ip=True) is False
 
     def test_activity_updates_last_activity(self, registry_dir, monkeypatch):
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)
         sid = session_registry.register_web_session(
-            'MagBearerToken=touch', 'user1@IPA.TEST', ccache)
+            'MagBearerToken=touch', 'user1@IPA.TEST', ccache,
+            max_per_user=0)
         record = session_registry.get_session_by_id(sid)
         record['last_activity'] = 1_000_000
         session_registry._atomic_write(
@@ -145,15 +152,144 @@ class TestSessionIdleTimeout:
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)
         sid = session_registry.register_web_session(
-            'MagBearerToken=idle-off', 'user1@IPA.TEST', ccache)
+            'MagBearerToken=idle-off', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.1', max_per_user=0)
         record = session_registry.get_session_by_id(sid)
         record['last_activity'] = int(time.time()) - 99999
         session_registry._atomic_write(
             session_registry._path_for_id(sid), record)
         assert session_registry.is_session_idle(record, idle_timeout=0) is False
         assert session_registry.session_allows_access(
-            ccache, idle_timeout=0) is True
+            ccache, idle_timeout=0, client_ip='203.0.113.1',
+            bind_ip=True) is True
         assert os.path.isfile(ccache)
+
+
+@pytest.mark.tier0
+class TestSessionConcurrency:
+    def test_max_one_revokes_oldest(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ca = _make_ccache(ccache_dir, 'ca')
+        cb = _make_ccache(ccache_dir, 'cb')
+        sid_a = session_registry.register_web_session(
+            'MagBearerToken=A', 'user1@IPA.TEST', ca,
+            client_ip='203.0.113.1', max_per_user=1)
+        time.sleep(0.01)
+        sid_b = session_registry.register_web_session(
+            'MagBearerToken=B', 'user1@IPA.TEST', cb,
+            client_ip='203.0.113.2', max_per_user=1)
+        assert sid_a != sid_b
+        assert session_registry.get_session_by_id(sid_a)['status'] == 'revoked'
+        assert session_registry.get_session_by_id(sid_b)['status'] == 'active'
+        assert not os.path.isfile(ca)
+        assert os.path.isfile(cb)
+
+    def test_max_two_keeps_newest(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ca = _make_ccache(ccache_dir, 'ca')
+        cb = _make_ccache(ccache_dir, 'cb')
+        cc = _make_ccache(ccache_dir, 'cc')
+        sid_a = session_registry.register_web_session(
+            'MagBearerToken=A2', 'user1@IPA.TEST', ca, max_per_user=2)
+        time.sleep(0.01)
+        sid_b = session_registry.register_web_session(
+            'MagBearerToken=B2', 'user1@IPA.TEST', cb, max_per_user=2)
+        time.sleep(0.01)
+        sid_c = session_registry.register_web_session(
+            'MagBearerToken=C2', 'user1@IPA.TEST', cc, max_per_user=2)
+        assert session_registry.get_session_by_id(sid_a)['status'] == 'revoked'
+        assert session_registry.get_session_by_id(sid_b)['status'] == 'active'
+        assert session_registry.get_session_by_id(sid_c)['status'] == 'active'
+        assert not os.path.isfile(ca)
+        assert os.path.isfile(cb)
+        assert os.path.isfile(cc)
+
+    def test_max_zero_unlimited(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ids = []
+        for i in range(3):
+            ccache = _make_ccache(ccache_dir, 'u%d' % i)
+            sid = session_registry.register_web_session(
+                'MagBearerToken=U%d' % i, 'user1@IPA.TEST', ccache,
+                max_per_user=0)
+            ids.append(sid)
+            time.sleep(0.01)
+        active = session_registry.list_web_sessions()
+        assert len(active) == 3
+        for sid in ids:
+            assert session_registry.get_session_by_id(sid)['status'] == 'active'
+
+    def test_other_user_not_revoked(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ca = _make_ccache(ccache_dir, 'alice')
+        cb = _make_ccache(ccache_dir, 'bob')
+        sid_a = session_registry.register_web_session(
+            'MagBearerToken=alice', 'alice@IPA.TEST', ca, max_per_user=1)
+        sid_b = session_registry.register_web_session(
+            'MagBearerToken=bob', 'bob@IPA.TEST', cb, max_per_user=1)
+        assert session_registry.get_session_by_id(sid_a)['status'] == 'active'
+        assert session_registry.get_session_by_id(sid_b)['status'] == 'active'
+
+
+@pytest.mark.tier0
+class TestSessionIpBinding:
+    def test_same_ip_allowed(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        session_registry.register_web_session(
+            'MagBearerToken=ip-ok', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.10', max_per_user=0)
+        assert session_registry.session_allows_access(
+            ccache, client_ip='203.0.113.10', bind_ip=True,
+            idle_timeout=0) is True
+        assert os.path.isfile(ccache)
+
+    def test_changed_ip_revokes_and_denies(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=ip-bad', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.10', max_per_user=0)
+        assert session_registry.session_allows_access(
+            ccache, client_ip='198.51.100.20', bind_ip=True,
+            idle_timeout=0) is False
+        assert session_registry.get_session_by_id(sid)['status'] == 'revoked'
+        assert not os.path.isfile(ccache)
+        assert session_registry.session_allows_access(
+            ccache, client_ip='203.0.113.10', bind_ip=True,
+            idle_timeout=0) is False
+
+    def test_bind_disabled_allows_ip_change(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        session_registry.register_web_session(
+            'MagBearerToken=ip-off', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.10', max_per_user=0)
+        assert session_registry.session_allows_access(
+            ccache, client_ip='198.51.100.20', bind_ip=False,
+            idle_timeout=0) is True
+        assert os.path.isfile(ccache)
+
+    def test_missing_stored_ip_denied(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=ip-miss', 'user1@IPA.TEST', ccache,
+            client_ip='', max_per_user=0)
+        assert session_registry.session_allows_access(
+            ccache, client_ip='203.0.113.10', bind_ip=True,
+            idle_timeout=0) is False
+        assert session_registry.get_session_by_id(sid)['status'] == 'revoked'
+
+    def test_missing_request_ip_denied(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=ip-noreq', 'user1@IPA.TEST', ccache,
+            client_ip='203.0.113.10', max_per_user=0)
+        assert session_registry.session_allows_access(
+            ccache, client_ip=None, bind_ip=True, idle_timeout=0) is False
+        assert session_registry.get_session_by_id(sid)['status'] == 'revoked'
 
 
 @pytest.mark.tier0

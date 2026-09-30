@@ -204,6 +204,14 @@ DEFAULT_CONFIG = (
     # the server-side web session registry entry is revoked and the user must
     # re-authenticate. Set to 0 to disable idle enforcement.
     ('web_session_idle_timeout', 1800),
+    # Maximum concurrent active Web UI/API sessions per user. When a new
+    # session is registered and the count would exceed this limit, the oldest
+    # excess sessions are revoked. Set to 0 for unlimited.
+    ('web_session_max_per_user', 1),
+    # When True, an authenticated Web session is valid only from the
+    # REMOTE_ADDR recorded at login. Mismatch or missing IP revokes the
+    # session. When False, client_ip is metadata only.
+    ('web_session_bind_ip', True),
 
     # Plain-text legal/responsibility notice shown on Web UI login pages
     # before authentication. Empty or unset disables the banner.

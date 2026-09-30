@@ -747,20 +747,27 @@ class KerberosSession(HTTP_Status):
         # ... and use it to resolve the ccache name (Issue: 6972 )
         gss_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
 
-        # Admin-killed / idle-expired / self-logged-out Web sessions stay
-        # revoked even if a stale cookie is presented before the ccache
-        # file disappears.
+        # Admin-killed / idle-expired / IP-bound / self-logged-out Web
+        # sessions stay revoked even if a stale cookie is presented before
+        # the ccache file disappears.
         try:
             from ipaserver import session_registry
             idle_timeout = getattr(
                 self.api.env, 'web_session_idle_timeout',
                 session_registry.DEFAULT_IDLE_TIMEOUT)
+            bind_ip = getattr(
+                self.api.env, 'web_session_bind_ip',
+                session_registry.DEFAULT_BIND_IP)
+            client_ip = environ.get('REMOTE_ADDR')
             if not session_registry.session_allows_access(
-                    ccache_name, idle_timeout=idle_timeout):
+                    ccache_name,
+                    idle_timeout=idle_timeout,
+                    client_ip=client_ip,
+                    bind_ip=bind_ip):
                 setattr(context, 'logout_cookie', 'MagBearerToken=')
                 logger.debug(
-                    'web session denied for ccache (revoked or idle), '
-                    'need login')
+                    'web session denied for ccache '
+                    '(revoked, idle, or IP binding); need login')
                 return None
         except Exception as e:
             logger.debug('web session registry check failed: %s', e)
@@ -815,12 +822,16 @@ class KerberosSession(HTTP_Status):
                 except Exception:
                     principal = None
             client_ip = environ.get('REMOTE_ADDR')
+            max_per_user = getattr(
+                self.api.env, 'web_session_max_per_user',
+                session_registry.DEFAULT_MAX_PER_USER)
             if principal:
                 session_registry.register_web_session(
                     session_cookie,
                     principal,
                     ccache_name,
                     client_ip=client_ip,
+                    max_per_user=max_per_user,
                 )
         except Exception as e:
             logger.debug('web session registration failed: %s', e)

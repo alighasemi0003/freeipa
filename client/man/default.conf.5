@@ -108,6 +108,25 @@ request tracked in the server\-side web session registry. The default is 1800
 (30 minutes). Set to 0 to disable idle timeout enforcement. This does not
 change Kerberos ticket lifetime policies.
 .TP
+.B web_session_max_per_user <integer>
+Maximum number of concurrent active FreeIPA Web UI/API sessions allowed for
+the same user. When a new session is created and the limit would be exceeded,
+the oldest excess sessions are revoked (their delegated credentials are
+removed) and the new login succeeds. The default is 1. Set to 0 to allow an
+unlimited number of concurrent Web sessions. This does not affect Kerberos
+TGTs outside the Web UI/API session registry.
+.TP
+.B web_session_bind_ip <boolean>
+When True (the default), an authenticated FreeIPA Web UI/API session is valid
+only when the request REMOTE_ADDR matches the client IP stored at login. A
+mismatch, missing stored IP, or missing REMOTE_ADDR revokes the session and
+requires re\-authentication. When False, the stored client IP is metadata only.
+Strict IP binding can force re\-login when the client address changes (NAT,
+mobile networks, IPv4/IPv6 switches, or reverse proxies). REMOTE_ADDR is
+authoritative; application code does not read X\-Forwarded\-For. Deployments
+that terminate TLS at a proxy should configure trusted Apache RemoteIP (or
+equivalent) so REMOTE_ADDR reflects the real client if binding is enabled.
+.TP
 .B login_warning <string>
 Plain\-text legal or responsibility notice displayed on the FreeIPA Web UI
 login pages (classic and modern) before authentication. The text is shown

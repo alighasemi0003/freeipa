@@ -4,8 +4,8 @@
 """Minimal server-side registry for FreeIPA Web UI/API sessions.
 
 Stores metadata only (no cookies, tokens, ticket material, or passwords).
-Used for admin listing, forced logout, and idle-timeout enforcement of Web
-sessions.
+Used for admin listing, forced logout, idle-timeout, concurrency limits, and
+optional client-IP binding of Web sessions.
 """
 
 from __future__ import absolute_import
@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 STATUS_ACTIVE = 'active'
 STATUS_REVOKED = 'revoked'
 
+_DEFAULTS = dict(DEFAULT_CONFIG)
+
 # Default idle timeout in seconds (from ipalib.constants.DEFAULT_CONFIG).
-DEFAULT_IDLE_TIMEOUT = dict(DEFAULT_CONFIG).get(
-    'web_session_idle_timeout', 1800
-)
+DEFAULT_IDLE_TIMEOUT = _DEFAULTS.get('web_session_idle_timeout', 1800)
+DEFAULT_MAX_PER_USER = _DEFAULTS.get('web_session_max_per_user', 1)
+DEFAULT_BIND_IP = _DEFAULTS.get('web_session_bind_ip', True)
 
 
 def _registry_dir():
@@ -95,8 +97,13 @@ def _read(path):
 
 
 def register_web_session(session_cookie, principal, ccache_name,
-                         client_ip=None):
-    """Create/update an active web session registry entry."""
+                         client_ip=None, max_per_user=None):
+    """Create/update an active web session registry entry.
+
+    After registration, enforces ``web_session_max_per_user`` by revoking the
+    oldest excess active sessions for the same username (new login always
+    succeeds).
+    """
     ensure_registry_dir()
     session_id = session_id_from_cookie(session_cookie)
     ccache_path = normalize_ccache_path(ccache_name)
@@ -120,7 +127,75 @@ def register_web_session(session_cookie, principal, ccache_name,
     }
     _atomic_write(_path_for_id(session_id), record)
     logger.debug('Registered web session %s for %s', session_id[:12], username)
+    enforce_max_sessions_for_user(
+        username, keep_session_id=session_id, max_per_user=max_per_user)
     return session_id
+
+
+def list_active_sessions_for_user(username):
+    """Return active sessions for ``username``, oldest first."""
+    sessions = [
+        s for s in list_web_sessions(include_revoked=False)
+        if s.get('username') == username
+    ]
+    sessions.sort(
+        key=lambda r: (int(r.get('created', 0) or 0), r.get('id') or ''))
+    return sessions
+
+
+def resolve_max_per_user(max_per_user=None):
+    """Normalize max concurrent sessions; ``0`` means unlimited."""
+    if max_per_user is None:
+        return int(DEFAULT_MAX_PER_USER)
+    try:
+        value = int(max_per_user)
+    except (TypeError, ValueError):
+        logger.debug(
+            'Invalid web_session_max_per_user %r, using default %s',
+            max_per_user, DEFAULT_MAX_PER_USER)
+        return int(DEFAULT_MAX_PER_USER)
+    if value < 0:
+        return int(DEFAULT_MAX_PER_USER)
+    return value
+
+
+def enforce_max_sessions_for_user(username, keep_session_id=None,
+                                  max_per_user=None):
+    """Revoke oldest excess active sessions for ``username``.
+
+    Keeps the newest ``max_per_user`` sessions, always retaining
+    ``keep_session_id`` when provided (the newly registered session).
+    Returns list of revoked session ids.
+    """
+    max_n = resolve_max_per_user(max_per_user)
+    if max_n == 0:
+        return []
+
+    sessions = list_active_sessions_for_user(username)
+    if len(sessions) <= max_n:
+        return []
+
+    # Always retain the newly registered session, then fill with newest.
+    keep_ids = set()
+    if keep_session_id:
+        keep_ids.add(keep_session_id)
+    for s in reversed(sessions):
+        if len(keep_ids) >= max_n:
+            break
+        keep_ids.add(s['id'])
+
+    revoked_ids = []
+    for s in sessions:
+        sid = s['id']
+        if sid in keep_ids:
+            continue
+        if revoke_session(sid):
+            revoked_ids.append(sid)
+            logger.info(
+                'Revoked excess web session %s for user %s '
+                '(max_per_user=%s)',
+                sid[:12], username, max_n)
+    return revoked_ids
 
 
 def get_session_by_id(session_id):
@@ -313,18 +388,64 @@ def enforce_idle_timeout(ccache_name, idle_timeout=None, now=None):
     return revoke_session(record['id'])
 
 
-def session_allows_access(ccache_name, idle_timeout=None, now=None):
+def resolve_bind_ip(bind_ip=None):
+    """Normalize web_session_bind_ip to a boolean."""
+    if bind_ip is None:
+        return bool(DEFAULT_BIND_IP)
+    if isinstance(bind_ip, bool):
+        return bind_ip
+    if isinstance(bind_ip, (int, float)):
+        return bool(bind_ip)
+    text = str(bind_ip).strip().lower()
+    if text in ('1', 'true', 'yes', 'on'):
+        return True
+    if text in ('0', 'false', 'no', 'off'):
+        return False
+    logger.debug(
+        'Invalid web_session_bind_ip %r, using default %s',
+        bind_ip, DEFAULT_BIND_IP)
+    return bool(DEFAULT_BIND_IP)
+
+
+def session_ip_allows(record, client_ip, bind_ip=None):
+    """Return True if IP binding permits access for ``record``.
+
+    When binding is enabled, missing stored IP, missing request IP, or any
+    mismatch fails. Does not revoke; caller decides.
+    """
+    if not resolve_bind_ip(bind_ip):
+        return True
+    stored = (record or {}).get('client_ip') or ''
+    current = client_ip or ''
+    if not stored or not current:
+        return False
+    return stored == current
+
+
+def session_allows_access(ccache_name, idle_timeout=None, now=None,
+                          client_ip=None, bind_ip=None):
     """Return True if the web session may continue for this ccache.
 
-    - No registry record: allow (cannot enforce idle without metadata).
+    Order:
+    - No registry record: allow (cannot enforce without metadata).
     - Already revoked: deny.
-    - Idle past timeout: revoke ccache/metadata and deny.
+    - IP binding enabled and IP missing/mismatched: revoke and deny.
+    - Idle past timeout: revoke and deny.
     - Otherwise: allow.
     """
     record = get_session_by_ccache(ccache_name)
     if record is None:
         return True
     if record.get('status') == STATUS_REVOKED:
+        return False
+    if not session_ip_allows(record, client_ip, bind_ip=bind_ip):
+        logger.info(
+            'Web session %s IP binding failed '
+            '(stored=%r current=%r); revoking',
+            (record.get('id') or '')[:12],
+            record.get('client_ip') or '',
+            client_ip or '')
+        revoke_session(record['id'])
         return False
     if is_session_idle(record, idle_timeout=idle_timeout, now=now):
         enforce_idle_timeout(
