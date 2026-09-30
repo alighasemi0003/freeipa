@@ -205,6 +205,10 @@ DEFAULT_CONFIG = (
     # re-authenticate. Set to 0 to disable idle enforcement.
     ('web_session_idle_timeout', 1800),
 
+    # Plain-text legal/responsibility notice shown on Web UI login pages
+    # before authentication. Empty or unset disables the banner.
+    ('login_warning', ''),
+
     # Number of seconds before client should check for schema update.
     ('schema_ttl', 3600),
 

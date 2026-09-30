@@ -19,6 +19,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import six
+
 from ipalib import Command
 from ipalib import Str
 from ipalib.frontend import Local
@@ -27,11 +29,28 @@ from ipalib.text import _
 from ipalib.util import json_serialize
 from ipalib.plugable import Registry
 
+if six.PY3:
+    unicode = str
+
 __doc__ = _("""
 Plugins not accessible directly through the CLI, commands used internally
 """)
 
 register = Registry()
+
+
+def get_login_warning(env):
+    """Return plain-text login warning from env, or empty string if unset.
+
+    The value is administrator-controlled configuration intended for display
+    as plain text only (never as HTML/JS/Markdown).
+    """
+    if env is None:
+        return u''
+    raw = getattr(env, 'login_warning', None)
+    if not raw:
+        return u''
+    return unicode(raw).strip()
 
 @register()
 class json_metadata(Command):
@@ -2055,6 +2074,19 @@ class i18n_messages(Command):
     }
     has_output = (
         Output('texts', dict, doc=_('Dict of I18N messages')),
+        Output('login_warning', unicode,
+               doc=_('Plain-text pre-authentication login warning')),
     )
     def execute(self, **options):
-        return dict(texts=json_serialize(self.messages))
+        # Expose login_warning via the existing unauthenticated
+        # /ipa/i18n_messages endpoint so both Web UIs can show it
+        # before credentials are entered. Only this single value is
+        # added; no other server configuration is disclosed.
+        try:
+            env = self.api.env
+        except AttributeError:
+            env = None
+        return dict(
+            texts=json_serialize(self.messages),
+            login_warning=get_login_warning(env),
+        )

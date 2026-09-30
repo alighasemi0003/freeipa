@@ -548,6 +548,8 @@ define(['dojo/_base/declare',
             }
 
             this.set('aside', aside);
+            // Plain-text configurable warning from /etc/ipa/default.conf
+            this.set('login_warning', config.login_warning || '');
         },
 
         set_reset_aside_text: function() {

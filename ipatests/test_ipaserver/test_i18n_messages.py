@@ -47,7 +47,7 @@ class test_i18n_messages(XMLRPC_test, Unauthorized_HTTP_test):
         """
         Build translations directly via command instance
         """
-        return i18n_messages({}).execute()
+        return i18n_messages(api).execute()
 
     def _fetch_i18n_msgs_http(self, accept_lang):
         """

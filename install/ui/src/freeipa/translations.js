@@ -55,6 +55,8 @@ var retrieve  = function() {
     function success_handler(data, text_status, xhr) {
         if (!data.error) {
             i18n.source = data.result.texts;
+            // Pre-auth login warning (plain text only; empty disables banner)
+            config.login_warning = data.result.login_warning || '';
             result = true;
         }
     }

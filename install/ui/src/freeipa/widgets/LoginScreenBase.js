@@ -78,11 +78,18 @@ define(['dojo/_base/declare',
          */
         aside: "",
 
+        /**
+         * Plain-text login warning banner (never HTML). Empty hides banner.
+         * @property {string}
+         */
+        login_warning: "",
+
         //nodes:
         dom_node: null,
         container_node: null,
         content_node: null,
         aside_node: null,
+        warning_node: null,
         buttons_node: null,
 
         /**
@@ -104,6 +111,20 @@ define(['dojo/_base/declare',
             if (this.aside_node) {
                 this.aside_node.innerHTML = this.aside;
             }
+        },
+
+        /**
+         * Set login warning as plain text only (textContent, never innerHTML).
+         */
+        _login_warningSetter: function(text) {
+            this.login_warning = text || '';
+            if (!this.warning_node) {
+                return;
+            }
+            // Use textContent so admin-controlled text cannot inject markup.
+            this.warning_node.textContent = this.login_warning;
+            dom_style.set(this.warning_node, 'display',
+                this.login_warning ? '' : 'none');
         },
 
         _viewSetter: function(view) {
@@ -182,6 +203,8 @@ define(['dojo/_base/declare',
                 'class': 'col-sm-7 col-md-7 col-lg-6 login'
             }, container);
 
+            this.render_login_warning(form_cont);
+
             var layout = IPA.fluid_layout({
                 label_cls: 'col-sm-3 col-md-3 control-label',
                 widget_cls: 'col-sm-9 col-md-9 controls'
@@ -199,6 +222,25 @@ define(['dojo/_base/declare',
             }, btn_row);
 
             this.render_buttons(this.buttons_node);
+        },
+
+        /**
+         * Render configurable login warning as a distinct plain-text notice.
+         * Content is set only via textContent (never innerHTML).
+         */
+        render_login_warning: function(container) {
+            this.warning_node = construct.create('div', {
+                'class': 'alert alert-warning login-warning',
+                role: 'alert',
+                style: {
+                    display: 'none',
+                    whiteSpace: 'pre-wrap',
+                    marginBottom: '1em'
+                }
+            }, container);
+            if (this.login_warning) {
+                this.set('login_warning', this.login_warning);
+            }
         },
 
         render_buttons: function(container) {

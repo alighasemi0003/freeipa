@@ -49,6 +49,12 @@ define([
         i18n_messages_url: '/ipa/i18n_messages',
 
         /**
+         * Plain-text login warning from server (pre-auth). Empty = hidden.
+         * Populated from i18n_messages response; never treat as HTML.
+         */
+        login_warning: '',
+
+        /**
          * password migration url
          */
         migration_url: '/ipa/migration/migration.py',
