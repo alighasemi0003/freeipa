@@ -747,14 +747,20 @@ class KerberosSession(HTTP_Status):
         # ... and use it to resolve the ccache name (Issue: 6972 )
         gss_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
 
-        # Admin-killed / self-logged-out Web sessions stay revoked even if a
-        # stale cookie is presented before the ccache file disappears.
+        # Admin-killed / idle-expired / self-logged-out Web sessions stay
+        # revoked even if a stale cookie is presented before the ccache
+        # file disappears.
         try:
             from ipaserver import session_registry
-            if session_registry.is_session_revoked_for_ccache(ccache_name):
+            idle_timeout = getattr(
+                self.api.env, 'web_session_idle_timeout',
+                session_registry.DEFAULT_IDLE_TIMEOUT)
+            if not session_registry.session_allows_access(
+                    ccache_name, idle_timeout=idle_timeout):
                 setattr(context, 'logout_cookie', 'MagBearerToken=')
                 logger.debug(
-                    'web session revoked for ccache, need login')
+                    'web session denied for ccache (revoked or idle), '
+                    'need login')
                 return None
         except Exception as e:
             logger.debug('web session registry check failed: %s', e)

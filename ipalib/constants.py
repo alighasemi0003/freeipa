@@ -200,6 +200,10 @@ DEFAULT_CONFIG = (
     ('replication_wait_timeout', 300),
     # How long to wait for a certmonger request to finish
     ('certmonger_wait_timeout', 300),
+    # Web UI/API session idle timeout in seconds. After this much inactivity
+    # the server-side web session registry entry is revoked and the user must
+    # re-authenticate. Set to 0 to disable idle enforcement.
+    ('web_session_idle_timeout', 1800),
 
     # Number of seconds before client should check for schema update.
     ('schema_ttl', 3600),

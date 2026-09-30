@@ -5,7 +5,7 @@
 from __future__ import absolute_import
 
 import os
-import tempfile
+import time
 from unittest import mock
 
 import pytest
@@ -80,6 +80,80 @@ class TestSessionRegistry:
         )
         assert session_registry.revoke_session_by_ccache(ccache) is True
         assert session_registry.is_session_revoked_for_ccache(ccache) is True
+
+
+@pytest.mark.tier0
+class TestSessionIdleTimeout:
+    def test_within_timeout_remains_valid(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        session_registry.register_web_session(
+            'MagBearerToken=idle-ok', 'user1@IPA.TEST', ccache)
+        assert session_registry.session_allows_access(
+            ccache, idle_timeout=1800) is True
+        assert os.path.isfile(ccache)
+        assert session_registry.is_session_revoked_for_ccache(ccache) is False
+
+    def test_exceeding_timeout_is_revoked(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=idle-out', 'user1@IPA.TEST', ccache)
+        record = session_registry.get_session_by_id(sid)
+        # Simulate last activity far in the past
+        record['last_activity'] = int(time.time()) - 3600
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+
+        assert session_registry.is_session_idle(record, idle_timeout=1800)
+        assert session_registry.enforce_idle_timeout(
+            ccache, idle_timeout=1800) is True
+        assert not os.path.isfile(ccache)
+        assert session_registry.is_session_revoked_for_ccache(ccache) is True
+
+    def test_revoked_idle_session_cannot_authenticate(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=idle-deny', 'user1@IPA.TEST', ccache)
+        record = session_registry.get_session_by_id(sid)
+        record['last_activity'] = int(time.time()) - 7200
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+
+        assert session_registry.session_allows_access(
+            ccache, idle_timeout=60) is False
+        # Still denied on subsequent checks
+        assert session_registry.session_allows_access(
+            ccache, idle_timeout=60) is False
+
+    def test_activity_updates_last_activity(self, registry_dir, monkeypatch):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=touch', 'user1@IPA.TEST', ccache)
+        record = session_registry.get_session_by_id(sid)
+        record['last_activity'] = 1_000_000
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+        monkeypatch.setattr(session_registry.time, 'time', lambda: 1_000_042)
+        session_registry.touch_session_activity(sid)
+        after = session_registry.get_session_by_id(sid)['last_activity']
+        assert after == 1_000_042
+
+    def test_idle_timeout_zero_disables_enforcement(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        sid = session_registry.register_web_session(
+            'MagBearerToken=idle-off', 'user1@IPA.TEST', ccache)
+        record = session_registry.get_session_by_id(sid)
+        record['last_activity'] = int(time.time()) - 99999
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+        assert session_registry.is_session_idle(record, idle_timeout=0) is False
+        assert session_registry.session_allows_access(
+            ccache, idle_timeout=0) is True
+        assert os.path.isfile(ccache)
 
 
 @pytest.mark.tier0

@@ -101,6 +101,13 @@ Specifies the local system hostname.
 .B http_timeout <seconds>
 Timeout for HTTP blocking requests (e.g. connection). The default value is 30 seconds.
 .TP
+.B web_session_idle_timeout <seconds>
+Maximum FreeIPA Web UI/API session inactivity period before the user must
+re\-authenticate. Measured in seconds from the last successful authenticated
+request tracked in the server\-side web session registry. The default is 1800
+(30 minutes). Set to 0 to disable idle timeout enforcement. This does not
+change Kerberos ticket lifetime policies.
+.TP
 .B in_server <boolean>
 Specifies whether requests should be forwarded to an IPA server or handled locally. This is used internally by IPA in a similar way as context. The same IPA framework is used by the ipa command\-line tool and the server. This setting tells the framework whether it should execute the command as if on the server or forward it via XML\-RPC to a remote server.
 .TP

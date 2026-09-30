@@ -4,7 +4,8 @@
 """Minimal server-side registry for FreeIPA Web UI/API sessions.
 
 Stores metadata only (no cookies, tokens, ticket material, or passwords).
-Used for admin listing and forced logout of Web sessions.
+Used for admin listing, forced logout, and idle-timeout enforcement of Web
+sessions.
 """
 
 from __future__ import absolute_import
@@ -16,12 +17,18 @@ import os
 import tempfile
 import time
 
+from ipalib.constants import DEFAULT_CONFIG
 from ipaplatform.paths import paths
 
 logger = logging.getLogger(__name__)
 
 STATUS_ACTIVE = 'active'
 STATUS_REVOKED = 'revoked'
+
+# Default idle timeout in seconds (from ipalib.constants.DEFAULT_CONFIG).
+DEFAULT_IDLE_TIMEOUT = dict(DEFAULT_CONFIG).get(
+    'web_session_idle_timeout', 1800
+)
 
 
 def _registry_dir():
@@ -252,3 +259,75 @@ def is_session_revoked_for_ccache(ccache_name):
     if record is None:
         return False
     return record.get('status') == STATUS_REVOKED
+
+
+def resolve_idle_timeout(idle_timeout=None):
+    """Normalize idle timeout to int seconds.
+
+    ``None`` uses the built-in default. ``0`` disables idle enforcement.
+    """
+    if idle_timeout is None:
+        return int(DEFAULT_IDLE_TIMEOUT)
+    try:
+        value = int(idle_timeout)
+    except (TypeError, ValueError):
+        logger.debug(
+            'Invalid web_session_idle_timeout %r, using default %s',
+            idle_timeout, DEFAULT_IDLE_TIMEOUT)
+        return int(DEFAULT_IDLE_TIMEOUT)
+    if value < 0:
+        return int(DEFAULT_IDLE_TIMEOUT)
+    return value
+
+
+def is_session_idle(record, idle_timeout=None, now=None):
+    """Return True if an active session has exceeded the idle timeout."""
+    timeout = resolve_idle_timeout(idle_timeout)
+    if timeout == 0:
+        return False
+    if not record or record.get('status') != STATUS_ACTIVE:
+        return False
+    last_activity = record.get('last_activity')
+    if last_activity is None:
+        last_activity = record.get('created', 0)
+    try:
+        last_activity = int(last_activity)
+    except (TypeError, ValueError):
+        last_activity = 0
+    if now is None:
+        now = int(time.time())
+    return (now - last_activity) > timeout
+
+
+def enforce_idle_timeout(ccache_name, idle_timeout=None, now=None):
+    """Revoke session if idle timeout exceeded.
+
+    Returns True if the session was revoked due to idle timeout.
+    """
+    record = get_session_by_ccache(ccache_name)
+    if not is_session_idle(record, idle_timeout=idle_timeout, now=now):
+        return False
+    logger.info(
+        'Web session %s idle timeout exceeded; revoking',
+        record.get('id', '')[:12])
+    return revoke_session(record['id'])
+
+
+def session_allows_access(ccache_name, idle_timeout=None, now=None):
+    """Return True if the web session may continue for this ccache.
+
+    - No registry record: allow (cannot enforce idle without metadata).
+    - Already revoked: deny.
+    - Idle past timeout: revoke ccache/metadata and deny.
+    - Otherwise: allow.
+    """
+    record = get_session_by_ccache(ccache_name)
+    if record is None:
+        return True
+    if record.get('status') == STATUS_REVOKED:
+        return False
+    if is_session_idle(record, idle_timeout=idle_timeout, now=now):
+        enforce_idle_timeout(
+            ccache_name, idle_timeout=idle_timeout, now=now)
+        return False
+    return True
