@@ -15,17 +15,27 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import urllib.parse
+from io import BytesIO
+from unittest.mock import MagicMock, patch
+
 import pytest
 import uuid
 
 from ipatests.test_ipaserver.httptest import Unauthorized_HTTP_test
+from ipatests.test_ipaserver.test_rpcserver import StartResponse
 from ipatests.test_xmlrpc.xmlrpc_test import XMLRPC_test
 from ipatests.util import assert_equal
 from ipalib import api, errors
 from ipapython.ipautil import run
+from ipaserver import rpcserver
 
 testuser = u'tuser'
 password = u'password'
+
+GENERIC_LOGIN_FAILURE = (
+    'The password or username you entered is incorrect'
+)
 
 
 @pytest.mark.tier1
@@ -75,6 +85,10 @@ class test_login_password(XMLRPC_test, Unauthorized_HTTP_test):
         assert_equal(response.status, 401)
         assert_equal(response.getheader('X-IPA-Rejection-Reason'),
                      'invalid-password')
+        body = response.read().decode('utf-8')
+        assert GENERIC_LOGIN_FAILURE in body
+        assert 'not found in Kerberos database' not in body
+        assert 'kinit:' not in body
 
     def test_invalid_referer(self):
         response = self._login(testuser, password, 'attacker.test')
@@ -86,3 +100,104 @@ class test_login_password(XMLRPC_test, Unauthorized_HTTP_test):
 
         assert_equal(response.status, 200)
         assert response.getheader('X-IPA-Rejection-Reason') is None
+
+
+@pytest.mark.tier0
+class test_login_password_failure_messages:
+    """Unit tests for unauthenticated login_password failure translation."""
+
+    def _handler(self):
+        mock_api = MagicMock()
+        mock_api.env.host = 'ipa.example.test'
+        mock_api.env.in_tree = True
+        mock_api.env.kinit_lifetime = None
+        return rpcserver.login_password(mock_api)
+
+    def _environ(self, user='testuser', password='badpassword'):
+        body = urllib.parse.urlencode(
+            {'user': user, 'password': password}
+        ).encode('utf-8')
+        return {
+            'REQUEST_METHOD': 'POST',
+            'CONTENT_TYPE': 'application/x-www-form-urlencoded',
+            'CONTENT_LENGTH': str(len(body)),
+            'wsgi.input': BytesIO(body),
+            'HTTP_REFERER': 'https://ipa.example.test/ipa/ui/',
+        }
+
+    def _assert_generic_invalid_password(self, status, headers, body):
+        assert status == '401 Unauthorized'
+        assert ('X-IPA-Rejection-Reason', 'invalid-password') in headers
+        assert GENERIC_LOGIN_FAILURE in body
+        assert 'not found in Kerberos database' not in body
+        assert 'credentials have been revoked' not in body
+        assert 'has expired while getting initial credentials' not in body
+        assert 'kinit:' not in body
+
+    def _call_with_kinit_error(self, exc):
+        handler = self._handler()
+        start_response = StartResponse()
+        with patch.object(handler, 'check_referer', return_value=True):
+            with patch.object(handler, 'kinit', side_effect=exc):
+                output = handler(self._environ(), start_response)
+        body = b''.join(output).decode('utf-8')
+        return start_response.status, start_response.headers, body
+
+    def test_nonexistent_principal_maps_to_generic_invalid_password(self):
+        exc = errors.InvalidSessionPassword(
+            principal='missing',
+            message=(
+                "kinit: Client 'missing' not found in Kerberos database "
+                "while getting initial credentials"
+            ),
+        )
+        status, headers, body = self._call_with_kinit_error(exc)
+        self._assert_generic_invalid_password(status, headers, body)
+
+    def test_invalid_password_maps_to_generic_invalid_password(self):
+        exc = errors.InvalidSessionPassword(
+            principal='testuser',
+            message=(
+                "kinit: Preauthentication failed while getting "
+                "initial credentials"
+            ),
+        )
+        status, headers, body = self._call_with_kinit_error(exc)
+        self._assert_generic_invalid_password(status, headers, body)
+
+    def test_user_locked_maps_to_generic_invalid_password(self):
+        exc = errors.UserLocked(
+            principal='testuser',
+            message=(
+                "kinit: Client's credentials have been revoked "
+                "while getting initial credentials"
+            ),
+        )
+        status, headers, body = self._call_with_kinit_error(exc)
+        self._assert_generic_invalid_password(status, headers, body)
+
+    def test_krbprincipal_expired_maps_to_generic_invalid_password(self):
+        exc = errors.KrbPrincipalExpired(
+            principal='testuser',
+            message=(
+                "kinit: Client's entry in database has expired "
+                "while getting initial credentials"
+            ),
+        )
+        status, headers, body = self._call_with_kinit_error(exc)
+        self._assert_generic_invalid_password(status, headers, body)
+
+    def test_password_expired_preserves_rejection_reason(self):
+        exc = errors.PasswordExpired(
+            principal='testuser',
+            message=(
+                "kinit: Cannot read password while getting "
+                "initial credentials"
+            ),
+        )
+        status, headers, body = self._call_with_kinit_error(exc)
+        assert status == '401 Unauthorized'
+        assert ('X-IPA-Rejection-Reason', 'password-expired') in headers
+        # Must remain distinguishable for the change-password UI flow.
+        assert ('X-IPA-Rejection-Reason', 'invalid-password') not in headers
+        assert GENERIC_LOGIN_FAILURE not in body

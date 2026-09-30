@@ -1084,21 +1084,25 @@ class login_password(Backend, KerberosSession):
                 self.kinit(user_principal, password,
                            ipa_ccache_name, use_armor=use_armor)
             except PasswordExpired as e:
+                # Distinct reason required for the password-change workflow.
                 return self.unauthorized(environ, start_response,
                                          str(e), 'password-expired')
-            except InvalidSessionPassword as e:
-                return self.unauthorized(environ, start_response,
-                                         str(e), 'invalid-password')
-            except KrbPrincipalExpired as e:
-                return self.unauthorized(environ,
-                                         start_response,
-                                         str(e),
-                                         'krbprincipal-expired')
-            except UserLocked as e:
-                return self.unauthorized(environ,
-                                         start_response,
-                                         str(e),
-                                         'user-locked')
+            except (InvalidSessionPassword,
+                    KrbPrincipalExpired,
+                    UserLocked) as e:
+                # Do not disclose account existence, lock, or principal-expiry
+                # details to unauthenticated clients. Keep the detailed
+                # Kerberos/kinit cause in server logs only.
+                logger.info(
+                    'login_password authentication failed (%s): %s',
+                    e.__class__.__name__, e)
+                return self.unauthorized(
+                    environ,
+                    start_response,
+                    unicode(
+                        _('The password or username you entered is incorrect')
+                    ),
+                    'invalid-password')
             return None
 
         logger.debug('WSGI login_password.__call__:')
