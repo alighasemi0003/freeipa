@@ -101,6 +101,10 @@ ServerTokens Prod
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header setifempty Content-Security-Policy "upgrade-insecure-requests; frame-ancestors 'none'; default-src 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
+  # One-year HSTS on HTTPS only (mod_ssl sets HTTPS). Omit includeSubDomains
+  # and preload: FreeIPA must not assume every subdomain of the realm DNS
+  # zone is HTTPS-capable or intended for HSTS inheritance.
+  Header always set Strict-Transport-Security "max-age=31536000" env=HTTPS
 
   # mod_session always sets two copies of the cookie, and this confuses our
   # legacy clients, the unset here works because it ends up unsetting only one
