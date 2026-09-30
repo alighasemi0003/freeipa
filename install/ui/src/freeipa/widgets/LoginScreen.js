@@ -652,6 +652,7 @@ define(['dojo/_base/declare',
             name: 'username',
             label: text.get('@i18n:login.username', "Username"),
             placeholder: text.get('@i18n:login.username', "Username"),
+            autocomplete: 'username',
             show_errors: false,
             undo: false
         },
@@ -663,6 +664,7 @@ define(['dojo/_base/declare',
                 '@i18n:login.password_and_otp',
                 'Password or Password+One-Time Password'
             ),
+            autocomplete: 'current-password',
             show_errors: false,
             undo: false
         },
@@ -670,6 +672,7 @@ define(['dojo/_base/declare',
             name: 'username_r',
             read_only: true,
             label: text.get('@i18n:login.username', "Username"),
+            autocomplete: 'username',
             show_errors: false,
             undo: false
         },
@@ -684,6 +687,7 @@ define(['dojo/_base/declare',
                 '@i18n:password.current_password',
                 "Current Password"
             ),
+            autocomplete: 'current-password',
             show_errors: false,
             undo: false
         },
@@ -699,6 +703,7 @@ define(['dojo/_base/declare',
                 '@i18n:password.new_password',
                 "New Password"
             ),
+            autocomplete: 'new-password',
             show_errors: false,
             undo: false
         },
@@ -714,6 +719,7 @@ define(['dojo/_base/declare',
                 '@i18n:password.new_password',
                 "New Password"
             ),
+            autocomplete: 'new-password',
             validators: [{
                 $type: 'same_password',
                 other_field: 'new_password'
@@ -729,6 +735,7 @@ define(['dojo/_base/declare',
                 '@i18n:password.otp_long',
                 'One-Time Password'
             ),
+            autocomplete: 'one-time-code',
             show_errors: false,
             undo: false
         }

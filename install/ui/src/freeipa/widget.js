@@ -877,6 +877,12 @@ IPA.text_widget = function(spec) {
      */
     that.input_type = spec.input_type || 'text';
 
+    /**
+     * HTML autocomplete attribute for sensitive/auth fields
+     * @property {string|null} autocomplete
+     */
+    that.autocomplete = spec.autocomplete || null;
+
     that.base_css_class = that.base_css_class + ' text-widget';
 
     /**
@@ -903,7 +909,7 @@ IPA.text_widget = function(spec) {
 
         that.input_group = $('<div/>').appendTo(container);
 
-        that.input = $('<input/>', {
+        var input_attrs = {
             type: that.input_type,
             name: that.name,
             id: id,
@@ -914,7 +920,12 @@ IPA.text_widget = function(spec) {
             keyup: function() {
                 that.on_value_changed();
             }
-        }).appendTo(that.input_group);
+        };
+        if (that.autocomplete) {
+            input_attrs.autocomplete = that.autocomplete;
+        }
+
+        that.input = $('<input/>', input_attrs).appendTo(that.input_group);
 
         that.input_group_btn = $('<div/>', {
             'class': 'input-group-btn'
