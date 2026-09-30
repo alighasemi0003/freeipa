@@ -89,6 +89,13 @@ define(['dojo/_base/declare',
 
         invalid_password: "The password or username you entered is incorrect",
 
+        invalid_captcha: "Invalid security check. Please try again.",
+
+        captcha_id: null,
+        captcha_enabled: false,
+        captcha_image_node: null,
+        captcha_refresh_node: null,
+
         user_locked: "The user account you entered is locked",
 
         //nodes:
@@ -263,13 +270,20 @@ define(['dojo/_base/declare',
             var login = this.get_field('username').get_value()[0];
             var password_f = this.get_field('password');
             var password = password_f.get_value()[0];
+            var captcha_id = this.captcha_id;
+            var captcha_answer = '';
+            var captcha_f = this.get_field('captcha_answer');
+            if (captcha_f && captcha_f.enabled) {
+                captcha_answer = captcha_f.get_value()[0] || '';
+            }
 
-            IPA.login_password(login, password).then(
+            IPA.login_password(login, password, captcha_id, captcha_answer).then(
                 function(result) {
 
                 if (result === 'success') {
                     this.emit('logged_in');
                     password_f.set_value('');
+                    if (captcha_f) captcha_f.set_value(['']);
                 } else if (result === 'password-expired') {
                     this.set('view', 'reset_and_login');
                     val_summary.add_info('login', this.password_expired);
@@ -279,12 +293,104 @@ define(['dojo/_base/declare',
                 } else if (result === 'invalid-password') {
                     password_f.set_value('');
                     val_summary.add_error('login', this.invalid_password);
+                    this.refresh_captcha();
+                } else if (result === 'invalid-captcha') {
+                    password_f.set_value('');
+                    if (captcha_f) captcha_f.set_value(['']);
+                    val_summary.add_error('login', this.invalid_captcha);
+                    this.refresh_captcha();
                 } else if (result === 'user-locked') {
                     password_f.set_value('');
                     val_summary.add_error('login', this.user_locked);
+                    this.refresh_captcha();
                 } else {
                     password_f.set_value('');
                     val_summary.add_error('login', this.form_auth_failed);
+                    this.refresh_captcha();
+                }
+            }.bind(this));
+        },
+
+        ensure_captcha_ui: function() {
+            if (this.captcha_image_node) return;
+            var captcha_w = this.get_widget('captcha_answer');
+            if (!captcha_w || !captcha_w.container) return;
+            var wrap = construct.create('div', {
+                'class': 'login-captcha',
+                style: { marginBottom: '0.75em' }
+            });
+            this.captcha_image_node = construct.create('div', {
+                'class': 'login-captcha-image',
+                style: {
+                    border: '1px solid #bbb',
+                    display: 'inline-block',
+                    verticalAlign: 'middle',
+                    background: '#f4f4f4',
+                    minWidth: '220px',
+                    minHeight: '72px'
+                }
+            }, wrap);
+            this.captcha_refresh_node = IPA.button({
+                name: 'refresh_captcha',
+                label: text.get('@i18n:buttons.refresh', 'Refresh CAPTCHA'),
+                button_class: 'btn btn-link',
+                click: this.refresh_captcha.bind(this)
+            })[0];
+            construct.place(this.captcha_refresh_node, wrap);
+            // Place above the captcha answer input widget
+            construct.place(wrap, captcha_w.container, 'first');
+        },
+
+        refresh_captcha: function() {
+            this.load_captcha();
+        },
+
+        load_captcha: function() {
+            if (!this.password_enabled()) {
+                this.captcha_enabled = false;
+                return;
+            }
+            this.ensure_captcha_ui();
+            IPA.fetch_login_captcha().then(function(data) {
+                var captcha_f = this.get_field('captcha_answer');
+                if (!data || data.enabled === false || !data.id || !data.image) {
+                    this.captcha_enabled = false;
+                    this.captcha_id = null;
+                    if (captcha_f) captcha_f.set_enabled(false);
+                    if (this.get_widget('captcha_answer')) {
+                        this.get_widget('captcha_answer').set_visible(false);
+                    }
+                    if (this.captcha_image_node) {
+                        this.captcha_image_node.style.display = 'none';
+                        this.captcha_image_node.innerHTML = '';
+                    }
+                    if (this.captcha_refresh_node) {
+                        this.captcha_refresh_node.style.display = 'none';
+                    }
+                    return;
+                }
+                this.captcha_enabled = true;
+                this.captcha_id = data.id;
+                if (captcha_f) {
+                    captcha_f.set_enabled(true);
+                    captcha_f.set_value(['']);
+                }
+                if (this.get_widget('captcha_answer')) {
+                    this.get_widget('captcha_answer').set_visible(true);
+                }
+                if (this.captcha_image_node) {
+                    // Trusted server-generated SVG only (never user HTML).
+                    this.captcha_image_node.style.display = 'inline-block';
+                    this.captcha_image_node.innerHTML = data.image;
+                    // Remove accidental metadata if any
+                    var banned = this.captcha_image_node.querySelectorAll(
+                        'title, desc, [aria-label]');
+                    for (var i = 0; i < banned.length; i++) {
+                        banned[i].parentNode.removeChild(banned[i]);
+                    }
+                }
+                if (this.captcha_refresh_node) {
+                    this.captcha_refresh_node.style.display = '';
                 }
             }.bind(this));
         },
@@ -492,7 +598,8 @@ define(['dojo/_base/declare',
             }
             this.set_visible_buttons(['cert_auth', 'sync', 'login']);
             if (this.password_enabled()) {
-                this.use_fields(['username', 'password']);
+                this.use_fields(['username', 'password', 'captcha_answer']);
+                this.load_captcha();
                 var username_f = this.get_field('username');
                 if (username_f.get_value()[0]) {
                     this.get_widget('password').focus_input();
@@ -638,6 +745,10 @@ define(['dojo/_base/declare',
                 spec.invalid_password || '@i18n:password.invalid_password',
                 this.invalid_password
             );
+            this.invalid_captcha = text.get(
+                spec.invalid_captcha || '@i18n:login.invalid_captcha',
+                this.invalid_captcha
+            );
 
             this.user_locked = text.get(
                 spec.user_locked || '@i18n:login.user_locked',
@@ -667,6 +778,18 @@ define(['dojo/_base/declare',
                 'Password or Password+One-Time Password'
             ),
             autocomplete: 'current-password',
+            show_errors: false,
+            undo: false
+        },
+        {
+            $type: 'text',
+            name: 'captcha_answer',
+            label: text.get('@i18n:login.captcha', "Security check"),
+            placeholder: text.get(
+                '@i18n:login.captcha_placeholder',
+                'Enter characters from the image'
+            ),
+            autocomplete: 'off',
             show_errors: false,
             undo: false
         },

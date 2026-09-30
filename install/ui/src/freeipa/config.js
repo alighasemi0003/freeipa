@@ -74,6 +74,11 @@ define([
          */
         forms_login_url: '/ipa/session/login_password',
 
+        /**
+         * Offline CAPTCHA challenge url (pre-auth)
+         */
+        captcha_url: '/ipa/session/captcha',
+
         //logout_url: '/ipa/session/json',
 
         /**

@@ -132,6 +132,12 @@ Alias /ipa/session/cookie "/usr/share/ipa/gssapi.login"
   Require all granted
 </Location>
 
+# Offline CAPTCHA challenge for password login (pre-auth, local only)
+<Location "/ipa/session/captcha">
+  Satisfy Any
+  Require all granted
+</Location>
+
 # Login with user certificate/smartcard configuration
 # This configuration needs to be loaded after <Location "/ipa">
 <Location "/ipa/session/login_x509">

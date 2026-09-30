@@ -45,6 +45,11 @@ class test_login_password(XMLRPC_test, Unauthorized_HTTP_test):
     @pytest.fixture(autouse=True)
     def login_setup(self, request):
         ccache = os.path.join('/tmp', str(uuid.uuid4()))
+        # CAPTCHA covered by dedicated unit tests; keep these auth tests focused.
+        try:
+            api.env.login_captcha_enabled = False
+        except Exception:
+            pass
         try:
             api.Command['user_add'](uid=testuser, givenname=u'Test', sn=u'User')
             api.Command['passwd'](testuser, password=password)
@@ -111,6 +116,7 @@ class test_login_password_failure_messages:
         mock_api.env.host = 'ipa.example.test'
         mock_api.env.in_tree = True
         mock_api.env.kinit_lifetime = None
+        mock_api.env.login_captcha_enabled = False
         return rpcserver.login_password(mock_api)
 
     def _environ(self, user='testuser', password='badpassword'):

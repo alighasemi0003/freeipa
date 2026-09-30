@@ -479,14 +479,15 @@ IPA.logout = function() {
 };
 
 /**
- * Login by username and password
- *
+ * Login by username and password. Optional offline CAPTCHA fields.
  * @member IPA
  * @param {string} username
  * @param {string} password
- * @return {string} Logout status - {password-expired, denied, invalid, success}
+ * @param {string} [captcha_id]
+ * @param {string} [captcha_answer]
+ * @return {Promise} resolves with status string
  */
-IPA.login_password = function(username, password) {
+IPA.login_password = function(username, password, captcha_id, captcha_answer) {
 
     var result = 'invalid';
     var d = new Deferred();
@@ -512,7 +513,8 @@ IPA.login_password = function(username, password) {
                 reason === 'denied' ||
                 reason === 'krbprincipal-expired' ||
                 reason === 'invalid-password' ||
-                reason === 'user-locked') {
+                reason === 'user-locked' ||
+                reason === 'invalid-captcha') {
                 result = reason;
             }
         }
@@ -523,6 +525,12 @@ IPA.login_password = function(username, password) {
         user: username,
         password: password
     };
+    if (captcha_id) {
+        data.captcha_id = captcha_id;
+    }
+    if (captcha_answer !== undefined && captcha_answer !== null) {
+        data.captcha_answer = captcha_answer;
+    }
 
     var request = {
         url: config.forms_login_url,
@@ -539,6 +547,26 @@ IPA.login_password = function(username, password) {
 
     $.ajax(request);
 
+    return d.promise;
+};
+
+/**
+ * Fetch offline CAPTCHA challenge (SVG). Returns Deferred with payload or null.
+ */
+IPA.fetch_login_captcha = function() {
+    var d = new Deferred();
+    $.ajax({
+        url: config.captcha_url,
+        type: 'GET',
+        dataType: 'json',
+        cache: false,
+        success: function(data) {
+            d.resolve(data || null);
+        },
+        error: function() {
+            d.resolve(null);
+        }
+    });
     return d.promise;
 };
 

@@ -134,6 +134,21 @@ as\-is and is never interpreted as HTML, JavaScript, or Markdown. When this
 option is missing or empty, no warning banner is shown. Example:
 "Authorized use only. User activity may be monitored."
 .TP
+.B login_captcha_enabled <boolean>
+When True (the default), FreeIPA Web password login
+(/ipa/session/login_password) requires a successful offline CAPTCHA challenge
+before Kerberos authentication is attempted. Challenges are generated and
+verified locally; no external CAPTCHA service is used. Kerberos Negotiate and
+X.509 login paths are not affected. Set to False to disable CAPTCHA.
+.TP
+.B login_captcha_ttl <seconds>
+Lifetime of a CAPTCHA challenge in seconds. The default is 120. Values outside
+a safe range are clamped by the server.
+.TP
+.B login_captcha_length <integer>
+Number of characters in a CAPTCHA challenge. The default is 6. The server
+clamps the value to a safe range (typically 4–8).
+.TP
 .B in_server <boolean>
 Specifies whether requests should be forwarded to an IPA server or handled locally. This is used internally by IPA in a similar way as context. The same IPA framework is used by the ipa command\-line tool and the server. This setting tells the framework whether it should execute the command as if on the server or forward it via XML\-RPC to a remote server.
 .TP

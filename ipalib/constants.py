@@ -217,6 +217,15 @@ DEFAULT_CONFIG = (
     # before authentication. Empty or unset disables the banner.
     ('login_warning', ''),
 
+    # Offline SVG CAPTCHA for Web password login (/ipa/session/login_password).
+    # When enabled, CAPTCHA must be solved before kinit. Kerberos/X.509 login
+    # paths are not affected.
+    ('login_captcha_enabled', True),
+    # Challenge lifetime in seconds (clamped to a safe range at runtime).
+    ('login_captcha_ttl', 120),
+    # Number of challenge characters (clamped to 4..8 at runtime).
+    ('login_captcha_length', 6),
+
     # Number of seconds before client should check for schema update.
     ('schema_ttl', 3600),
 

@@ -27,6 +27,7 @@ from __future__ import absolute_import
 
 import logging
 from xml.sax.saxutils import escape
+import json
 import os
 import time
 import traceback
@@ -1120,6 +1121,71 @@ class login_x509(KerberosLogin):
         return super(login_x509, self).__call__(environ, start_response)
 
 
+class login_captcha_challenge(Backend, HTTP_Status):
+    """Unauthenticated endpoint that issues an offline SVG CAPTCHA challenge."""
+
+    content_type = 'application/json'
+    key = '/session/captcha'
+
+    def _on_finalize(self):
+        super(login_captcha_challenge, self)._on_finalize()
+        self.api.Backend.wsgi_dispatch.mount(self, self.key)
+
+    def __call__(self, environ, start_response):
+        from ipaserver import login_captcha
+
+        method = environ.get('REQUEST_METHOD', '').upper()
+        if method != 'GET':
+            status = '405 Method Not Allowed'
+            headers = [
+                ('Allow', 'GET'),
+                ('Content-Type', 'text/plain; charset=utf-8'),
+            ]
+            start_response(status, headers)
+            return [b'']
+
+        if not login_captcha.resolve_enabled(
+                getattr(self.api.env, 'login_captcha_enabled', None)):
+            # CAPTCHA disabled: return empty challenge so UI can hide widget.
+            body = json.dumps({'enabled': False}).encode('utf-8')
+            start_response(HTTP_STATUS_SUCCESS, [
+                ('Content-Type', 'application/json; charset=utf-8'),
+                ('Cache-Control', 'no-store'),
+            ])
+            return [body]
+
+        client_ip = environ.get('REMOTE_ADDR') or ''
+        try:
+            challenge = login_captcha.create_challenge(
+                client_ip,
+                ttl=getattr(self.api.env, 'login_captcha_ttl', None),
+                length=getattr(self.api.env, 'login_captcha_length', None),
+            )
+            challenge['enabled'] = True
+            # Never include answer/verifier in response.
+            body = json.dumps(challenge).encode('utf-8')
+        except RuntimeError:
+            status = '429 Too Many Requests'
+            start_response(status, [
+                ('Content-Type', 'application/json; charset=utf-8'),
+                ('Cache-Control', 'no-store'),
+            ])
+            return [b'{"error":"rate-limited"}']
+        except Exception as e:
+            logger.debug('CAPTCHA challenge creation failed: %s', e)
+            status = HTTP_STATUS_SERVER_ERROR
+            start_response(status, [
+                ('Content-Type', 'application/json; charset=utf-8'),
+            ])
+            return [b'{"error":"unavailable"}']
+
+        start_response(HTTP_STATUS_SUCCESS, [
+            ('Content-Type', 'application/json; charset=utf-8'),
+            ('Cache-Control', 'no-store'),
+        ])
+        return [body]
+
+
 class login_password(Backend, KerberosSession):
 
     content_type = 'text/plain'
@@ -1210,6 +1276,29 @@ class login_password(Backend, KerberosSession):
                 return self.bad_request(environ, start_response, "more than one password parameter")
         else:
             return self.bad_request(environ, start_response, "no password specified")
+
+        # Offline CAPTCHA must succeed before any kinit (no password-failure
+        # accounting for CAPTCHA failures). Same response for any username.
+        from ipaserver import login_captcha
+        if login_captcha.resolve_enabled(
+                getattr(self.api.env, 'login_captcha_enabled', None)):
+            captcha_id = query_dict.get('captcha_id', [None])[0]
+            captcha_answer = query_dict.get('captcha_answer', [None])[0]
+            client_ip = environ.get('REMOTE_ADDR') or ''
+            ok = False
+            if captcha_id and captcha_answer is not None:
+                try:
+                    ok = login_captcha.verify_and_consume(
+                        captcha_id, captcha_answer, client_ip)
+                except Exception as e:
+                    logger.debug('CAPTCHA verify failed: %s', e)
+                    ok = False
+            if not ok:
+                return self.unauthorized(
+                    environ,
+                    start_response,
+                    unicode(_('Invalid security check. Please try again.')),
+                    'invalid-captcha')
 
         # Get the ccache we'll use and attempt to get credentials in it with user,password
         ipa_ccache_name = os.path.join(paths.IPA_CCACHES,
