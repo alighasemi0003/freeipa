@@ -403,6 +403,8 @@ class BasePathNamespace:
     IPA_ODS_EXPORTER_CCACHE = "/var/opendnssec/tmp/ipa-ods-exporter.ccache"
     VAR_RUN_DIRSRV_DIR = "/run/dirsrv"
     IPA_CCACHES = "/run/ipa/ccaches"
+    # Metadata-only registry for FreeIPA Web UI/API sessions (admin list/kill)
+    IPA_WEB_SESSIONS = "/run/ipa/web_sessions"
     CA_BUNDLE_PEM = "/var/lib/ipa-client/pki/ca-bundle.pem"
     KDC_CA_BUNDLE_PEM = "/var/lib/ipa-client/pki/kdc-ca-bundle.pem"
     IPA_RENEWAL_LOCK = "/run/ipa/renewal.lock"

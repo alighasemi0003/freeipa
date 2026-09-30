@@ -747,6 +747,18 @@ class KerberosSession(HTTP_Status):
         # ... and use it to resolve the ccache name (Issue: 6972 )
         gss_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
 
+        # Admin-killed / self-logged-out Web sessions stay revoked even if a
+        # stale cookie is presented before the ccache file disappears.
+        try:
+            from ipaserver import session_registry
+            if session_registry.is_session_revoked_for_ccache(ccache_name):
+                setattr(context, 'logout_cookie', 'MagBearerToken=')
+                logger.debug(
+                    'web session revoked for ccache, need login')
+                return None
+        except Exception as e:
+            logger.debug('web session registry check failed: %s', e)
+
         # Fail if Kerberos credentials are expired or missing
         creds = get_credentials_if_valid(name=gss_name,
                                          ccache_name=ccache_name)
@@ -755,6 +767,14 @@ class KerberosSession(HTTP_Status):
             logger.debug(
                 'ccache expired or invalid, deleting session, need login')
             return None
+
+        try:
+            from ipaserver import session_registry
+            record = session_registry.get_session_by_ccache(ccache_name)
+            if record and record.get('status') == session_registry.STATUS_ACTIVE:
+                session_registry.touch_session_activity(record['id'])
+        except Exception as e:
+            logger.debug('web session activity update failed: %s', e)
 
         return ccache_name
 
@@ -778,6 +798,26 @@ class KerberosSession(HTTP_Status):
             return self.unauthorized(environ, start_response,
                                      str(e),
                                      'Authentication failed')
+
+        try:
+            from ipaserver import session_registry
+            from ipalib.krb_utils import get_principal
+            principal = environ.get('GSS_NAME')
+            if not principal:
+                try:
+                    principal = get_principal(ccache_name=ccache_name)
+                except Exception:
+                    principal = None
+            client_ip = environ.get('REMOTE_ADDR')
+            if principal:
+                session_registry.register_web_session(
+                    session_cookie,
+                    principal,
+                    ccache_name,
+                    client_ip=client_ip,
+                )
+        except Exception as e:
+            logger.debug('web session registration failed: %s', e)
 
         headers.append(('IPASESSION', session_cookie))
 
