@@ -1,5 +1,5 @@
 #
-# VERSION 41 - DO NOT REMOVE THIS LINE
+# VERSION 42 - DO NOT REMOVE THIS LINE
 #
 # This file may be overwritten on upgrades.
 #
@@ -8,6 +8,12 @@
 # The module is used to search users according the certificate.
 <IfModule !lookup_identity_module>
     LoadModule lookup_identity_module modules/mod_lookup_identity.so
+</IfModule>
+
+# Restrict HTTP methods on /ipa (AllowMethods). Loaded by default on
+# RHEL/Fedora; load explicitly when missing (e.g. minimal module sets).
+<IfModule !allowmethods_module>
+    LoadModule allowmethods_module modules/mod_allowmethods.so
 </IfModule>
 
 TraceEnable Off
@@ -77,6 +83,12 @@ ServerTokens Prod
 
 # Protect /ipa and everything below it in webspace with Apache Kerberos auth
 <Location "/ipa">
+  # Central HTTP method allow-list for the entire /ipa URL space.
+  # FreeIPA only needs GET (UI/static/CAPTCHA) and POST (login/RPC).
+  # PUT/PATCH/DELETE/OPTIONS are rejected at Apache before WSGI.
+  # HEAD is not listed: Apache treats HEAD as the metadata form of GET.
+  AllowMethods GET POST
+
   AuthType GSSAPI
   AuthName "Kerberos Login"
   GssapiUseSessions On
