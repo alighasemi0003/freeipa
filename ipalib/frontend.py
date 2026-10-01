@@ -539,6 +539,11 @@ class Command(HasParam):
             if all([self.name != "console",
                     not getattr(context, "audit_action", None)]):
                 setattr(context, "audit_action", self.name)
+            try:
+                from ipaserver import sensitive_reauth
+                sensitive_reauth.enforce_if_needed(self, params)
+            except ImportError:
+                pass
         (args, options) = self.params_2_args_options(**params)
         try:
             ret = self.run(*args, **options)

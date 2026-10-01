@@ -226,6 +226,16 @@ DEFAULT_CONFIG = (
     # Number of challenge characters (clamped to 4..8 at runtime).
     ('login_captcha_length', 6),
 
+    # Sensitive-action step-up reauthentication for Web sessions.
+    # policy: default | custom | disabled (invalid/missing -> default)
+    ('sensitive_action_reauth_policy', 'default'),
+    # Freshness window in seconds. 0 = require reauth for every sensitive op
+    # (with a short grace so the UI can retry once after verify). Invalid -> 300.
+    ('sensitive_action_reauth_timeout', 300),
+    # CSV of exact backend command names; used only when policy=custom.
+    # Missing/empty/all-invalid falls back to the built-in default set.
+    ('sensitive_action_reauth_commands', None),
+
     # Number of seconds before client should check for schema update.
     ('schema_ttl', 3600),
 

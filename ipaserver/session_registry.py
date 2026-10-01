@@ -122,6 +122,7 @@ def register_web_session(session_cookie, principal, ccache_name,
         'ccache_path': ccache_path,
         'created': now,
         'last_activity': now,
+        'last_reauth_at': None,
         'client_ip': client_ip or '',
         'status': STATUS_ACTIVE,
     }
@@ -245,6 +246,39 @@ def touch_session_activity(session_id):
         _atomic_write(_path_for_id(session_id), record)
     except OSError as e:
         logger.debug('Failed updating session activity: %s', e)
+
+
+def mark_session_reauth(session_id, now=None):
+    """Record successful credential verification for step-up auth."""
+    record = get_session_by_id(session_id)
+    if not record or record.get('status') != STATUS_ACTIVE:
+        return False
+    if now is None:
+        now = int(time.time())
+    record['last_reauth_at'] = int(now)
+    record['last_activity'] = int(now)
+    try:
+        _atomic_write(_path_for_id(session_id), record)
+    except OSError as e:
+        logger.debug('Failed updating session reauth: %s', e)
+        return False
+    return True
+
+
+def consume_reauth_credit(session_id):
+    """Clear last_reauth_at after a one-shot (timeout=0) sensitive allow."""
+    record = get_session_by_id(session_id)
+    if not record or record.get('status') != STATUS_ACTIVE:
+        return False
+    if record.get('last_reauth_at') is None:
+        return True
+    record['last_reauth_at'] = None
+    try:
+        _atomic_write(_path_for_id(session_id), record)
+    except OSError as e:
+        logger.debug('Failed consuming reauth credit: %s', e)
+        return False
+    return True
 
 
 def list_web_sessions(include_revoked=False):

@@ -647,6 +647,16 @@ class UserLocked(SessionError):
     """
     errno = 1204
 
+
+class ReauthRequired(SessionError):
+    """
+    **1205** Raised when a sensitive Web-session command needs step-up
+    credential verification. Does not invalidate the existing session.
+    """
+    errno = 1205
+    format = _('Re-authentication required for this operation')
+
+
 ##############################################################################
 # 2000 - 2999: Authorization errors
 class AuthorizationError(PublicError):

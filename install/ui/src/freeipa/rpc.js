@@ -401,6 +401,26 @@ rpc.command = function(spec) {
                 window.location.reload();
 
             } else if (data.error) {
+                var err_code = data.error.code;
+                var err_name = data.error.name || '';
+                if ((err_code === 1205 || err_name === 'ReauthRequired') &&
+                        !that._reauth_retried) {
+                    that._reauth_retried = true;
+                    that.handle_notify_execution_end();
+                    IPA.prompt_reauth(function() {
+                        // Retry original RPC exactly once after verify.
+                        that.execute();
+                    }, function() {
+                        error_handler.call(this, xhr, text_status, {
+                            name: text.get('@i18n:errors.ipa_error', 'IPA Error') +
+                                  ' ' + data.error.code + ': ' + data.error.name,
+                            code: data.error.code,
+                            message: data.error.message,
+                            data: data
+                        });
+                    });
+                    return;
+                }
                 // error_handler() publishes 'rpc-end'
                 error_handler.call(this, xhr, text_status,  /* error_thrown */ {
                     name: text.get('@i18n:errors.ipa_error', 'IPA Error') + ' ' +

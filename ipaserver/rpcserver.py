@@ -1479,6 +1479,138 @@ class change_password(Backend, HTTP_Status):
                                           message=str(message))
         return [output.encode('utf-8')]
 
+
+class session_verify_credentials(Backend, KerberosSession):
+    """Verify password(+OTP) for an existing Web session without minting a new one.
+
+    Used for sensitive-action step-up. Does not run CAPTCHA, does not register
+    a new session, and does not change the ipa_session cookie.
+    """
+
+    content_type = 'text/plain'
+    key = '/session/verify_credentials'
+
+    def _on_finalize(self):
+        super(session_verify_credentials, self)._on_finalize()
+        self.api.Backend.wsgi_dispatch.mount(self, self.key)
+
+    def __call__(self, environ, start_response):
+        logger.debug('WSGI session_verify_credentials.__call__:')
+
+        if not self.check_referer(environ):
+            return self.bad_request(environ, start_response, 'denied')
+
+        content_type = environ.get('CONTENT_TYPE', '').lower()
+        if not content_type.startswith('application/x-www-form-urlencoded'):
+            return self.bad_request(
+                environ, start_response,
+                "Content-Type must be application/x-www-form-urlencoded")
+
+        method = environ.get('REQUEST_METHOD', '').upper()
+        if method != 'POST':
+            return self.bad_request(
+                environ, start_response,
+                "HTTP request method must be POST")
+
+        # Existing authenticated Web session required (idle/IP/revoked enforced).
+        ccache_name = self.get_environ_creds(environ)
+        if ccache_name is None:
+            return self.need_login(start_response)
+
+        from ipaserver import session_registry
+        record = session_registry.get_session_by_ccache(ccache_name)
+        if not record or record.get('status') != session_registry.STATUS_ACTIVE:
+            return self.unauthorized(
+                environ, start_response,
+                unicode(_('Authentication failed')),
+                'denied')
+
+        try:
+            query_string = read_input(environ)
+            query_dict = parse_qs(query_string)
+        except Exception:
+            return self.bad_request(
+                environ, start_response, "cannot parse query data")
+
+        password = query_dict.get('password', [None])[0]
+        otp = query_dict.get('otp', [None])[0]
+        if not password:
+            return self.unauthorized(
+                environ, start_response,
+                unicode(_('Authentication failed')),
+                'invalid-password')
+
+        # Optional OTP field concatenated like password+OTP login.
+        if otp:
+            password = '%s%s' % (password, otp)
+
+        principal = (
+            environ.get('GSS_NAME')
+            or record.get('principal')
+            or getattr(context, 'principal', None)
+        )
+        if not principal:
+            return self.unauthorized(
+                environ, start_response,
+                unicode(_('Authentication failed')),
+                'denied')
+
+        # Verify via Kerberos into a temporary ccache; never reuse for session.
+        import tempfile
+
+        tmp_ccache = None
+        armor_ccache = None
+        try:
+            fd, tmp_ccache = tempfile.mkstemp(
+                prefix='reauth_', dir=paths.IPA_CCACHES)
+            os.close(fd)
+            os.unlink(tmp_ccache)
+
+            try:
+                fd_a, armor_ccache = tempfile.mkstemp(
+                    prefix='reauth_armor_', dir=paths.IPA_CCACHES)
+                os.close(fd_a)
+                os.unlink(armor_ccache)
+                kinit_armor(armor_ccache)
+                kinit_password(
+                    principal, password, ccache_name=tmp_ccache,
+                    armor_ccache_name=armor_ccache)
+            except Exception:
+                # Retry without FAST armor (same fallback as password login).
+                try:
+                    kinit_password(
+                        principal, password, ccache_name=tmp_ccache)
+                except Exception as e:
+                    logger.debug(
+                        'session_verify_credentials failed for %s: %s',
+                        str(principal).split('@', 1)[0], e)
+                    return self.unauthorized(
+                        environ, start_response,
+                        unicode(_('Authentication failed')),
+                        'invalid-password')
+
+            if not session_registry.mark_session_reauth(record['id']):
+                return self.unauthorized(
+                    environ, start_response,
+                    unicode(_('Authentication failed')),
+                    'denied')
+
+            status = HTTP_STATUS_SUCCESS
+            headers = [('Content-Type', 'text/plain; charset=utf-8')]
+            start_response(status, headers)
+            return [b'ok']
+        finally:
+            for path in (tmp_ccache, armor_ccache):
+                if path:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+            # Do not retain password/otp in locals longer than needed.
+            password = None
+            otp = None
+
+
 class sync_token(Backend, HTTP_Status):
     content_type = 'text/plain'
     key = '/session/sync_token'

@@ -703,6 +703,118 @@ IPA.password_selfservice = function() {
 };
 
 /**
+ * Verify credentials for sensitive-action step-up without creating a new session.
+ * @member IPA
+ * @param {string} password
+ * @param {string} [otp]
+ * @return {Promise} resolves true on success
+ */
+IPA.verify_session_credentials = function(password, otp) {
+    var deferred = new Deferred();
+    var data = {
+        password: password || ''
+    };
+    if (otp) {
+        data.otp = otp;
+    }
+    $.ajax({
+        url: config.verify_credentials_url,
+        data: data,
+        contentType: 'application/x-www-form-urlencoded',
+        processData: true,
+        type: 'POST',
+        dataType: 'text',
+        success: function() {
+            deferred.resolve(true);
+        },
+        error: function() {
+            deferred.resolve(false);
+        }
+    });
+    return deferred.promise;
+};
+
+/**
+ * Prompt for password(+OTP) to satisfy REAUTH_REQUIRED, then call on_success.
+ * Does not invalidate the session. Retries are caller-controlled.
+ * @member IPA
+ * @param {Function} on_success
+ * @param {Function} [on_cancel]
+ */
+IPA.prompt_reauth = function(on_success, on_cancel) {
+    var dialog = IPA.dialog({
+        name: 'reauth_required',
+        title: text.get('@i18n:login.reauth_title', 'Confirm your identity'),
+        width: '28em'
+    });
+    dialog.message = text.get(
+        '@i18n:login.reauth_message',
+        'Re-authentication is required to continue with this sensitive operation.'
+    );
+    dialog.create_content = function() {
+        dialog.container.append($('<p/>', { text: dialog.message }));
+        var form = $('<div class="form-horizontal"/>');
+        form.append($('<label for="ipa-reauth-password"/>').text(
+            text.get('@i18n:password.current_password', 'Current password')));
+        dialog.password_input = $('<input/>', {
+            id: 'ipa-reauth-password',
+            name: 'password',
+            type: 'password',
+            autocomplete: 'current-password',
+            'class': 'form-control'
+        });
+        form.append(dialog.password_input);
+        form.append($('<label for="ipa-reauth-otp"/>').text(
+            text.get('@i18n:password.otp', 'OTP (if required)')));
+        dialog.otp_input = $('<input/>', {
+            id: 'ipa-reauth-otp',
+            name: 'otp',
+            type: 'password',
+            autocomplete: 'one-time-code',
+            'class': 'form-control'
+        });
+        form.append(dialog.otp_input);
+        dialog.error_node = $('<div class="alert alert-danger" style="display:none"/>');
+        form.append(dialog.error_node);
+        dialog.container.append(form);
+        dialog.password_input.focus();
+    };
+    dialog.create_button({
+        name: 'confirm',
+        label: text.get('@i18n:buttons.confirm', 'Confirm'),
+        click: function() {
+            var pw = dialog.password_input.val() || '';
+            var otp = dialog.otp_input.val() || '';
+            dialog.error_node.hide().text('');
+            IPA.verify_session_credentials(pw, otp).then(function(ok) {
+                dialog.password_input.val('');
+                dialog.otp_input.val('');
+                if (ok) {
+                    dialog.close();
+                    if (on_success) on_success();
+                } else {
+                    dialog.error_node.text(text.get(
+                        '@i18n:login.reauth_failed',
+                        'Authentication failed. Please try again.'
+                    )).show();
+                }
+            });
+        }
+    });
+    dialog.create_button({
+        name: 'cancel',
+        label: text.get('@i18n:buttons.cancel', 'Cancel'),
+        click: function() {
+            dialog.password_input.val('');
+            dialog.otp_input.val('');
+            dialog.close();
+            if (on_cancel) on_cancel();
+        }
+    });
+    dialog.open();
+};
+
+/**
  * Build object with {@link builder}.
  * @member IPA
  * @param {Object} spec - contruction spec

@@ -149,6 +149,39 @@ a safe range are clamped by the server.
 Number of characters in a CAPTCHA challenge. The default is 6. The server
 clamps the value to a safe range (typically 4–8).
 .TP
+.B sensitive_action_reauth_policy <string>
+Controls Web\-session step\-up reauthentication before selected sensitive
+commands. Valid values are:
+.RS
+.IP \(bu 3
+\fBdefault\fR (the default) — use the built\-in secure sensitive\-command set.
+.IP \(bu 3
+\fBcustom\fR — use exact backend command names listed in
+\fBsensitive_action_reauth_commands\fR.
+.IP \(bu 3
+\fBdisabled\fR — do not require sensitive\-action reauthentication.
+.RE
+Missing or invalid values fall back to \fBdefault\fR. Configuration is loaded
+at IPA process startup; restart httpd/IPA services after changing it. This
+applies to authenticated FreeIPA Web UI/API sessions only; CLI Kerberos clients
+without a Web session registry entry are not gated by this policy.
+.TP
+.B sensitive_action_reauth_timeout <seconds>
+How long a successful step\-up credential verification remains valid for
+additional sensitive commands, in seconds. The default is 300. Set to 0 to
+require reauthentication for every sensitive operation (a short server\-side
+grace allows the Web UI to retry the original request once after verify).
+Invalid or negative values fall back to 300.
+.TP
+.B sensitive_action_reauth_commands <comma-separated list>
+Exact FreeIPA backend command names requiring step\-up when
+\fBsensitive_action_reauth_policy=custom\fR (for example
+\fBuser_del,user_disable,session_kill,cert_revoke\fR). Whitespace is trimmed
+and duplicates are removed. Unknown names are ignored with a server warning.
+If the resulting list is empty, the built\-in default sensitive set is used so
+misconfiguration cannot silently disable the gate. This option is ignored when
+policy is \fBdefault\fR or \fBdisabled\fR.
+.TP
 .B in_server <boolean>
 Specifies whether requests should be forwarded to an IPA server or handled locally. This is used internally by IPA in a similar way as context. The same IPA framework is used by the ipa command\-line tool and the server. This setting tells the framework whether it should execute the command as if on the server or forward it via XML\-RPC to a remote server.
 .TP

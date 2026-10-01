@@ -79,6 +79,11 @@ define([
          */
         captcha_url: '/ipa/session/captcha',
 
+        /**
+         * Sensitive-action step-up credential verification (existing session)
+         */
+        verify_credentials_url: '/ipa/session/verify_credentials',
+
         //logout_url: '/ipa/session/json',
 
         /**
