@@ -4,3 +4,5 @@ a+ /run/ipa/ccaches - - - - g:@HTTPD_GROUP@:rwx
 # Offline login CAPTCHA challenge state + HMAC key.
 # WSGI daemon (process-group=ipa) runs as ipaapi, not httpd.
 d /run/ipa/login_captcha 0700 ipaapi ipaapi
+# Web UI/API session metadata registry (idle timeout / concurrency / IP bind).
+d /run/ipa/web_sessions 0700 ipaapi ipaapi

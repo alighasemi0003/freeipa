@@ -164,6 +164,61 @@ class TestSessionIdleTimeout:
             bind_ip=True) is True
         assert os.path.isfile(ccache)
 
+    def test_bind_session_ccache_does_not_touch_last_activity(
+            self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        stale = _make_ccache(ccache_dir, 'kinit_1')
+        live = _make_ccache(ccache_dir, 'user1@IPA.TEST-abc')
+        cookie = 'MagBearerToken=rebind'
+        sid = session_registry.register_web_session(
+            cookie, 'user1@IPA.TEST', stale,
+            client_ip='203.0.113.1', max_per_user=0)
+        record = session_registry.get_session_by_id(sid)
+        record['last_activity'] = 1_111_111
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+
+        assert session_registry.bind_session_ccache(cookie, live) is True
+        after = session_registry.get_session_by_id(sid)
+        assert after['ccache_path'] == live
+        assert after['last_activity'] == 1_111_111
+        # Lookup by live path now works; stale path does not.
+        assert session_registry.get_session_by_ccache(live)['id'] == sid
+        assert session_registry.get_session_by_ccache(stale) is None
+
+    def test_expired_check_does_not_require_activity_touch(
+            self, registry_dir, monkeypatch):
+        """Idle deny must use previous last_activity; revoke may stamp now.
+
+        Mirrors get_environ_creds order: bind -> allows_access -> (no touch).
+        """
+        _reg, ccache_dir = registry_dir
+        stale = _make_ccache(ccache_dir, 'kinit_old')
+        live = _make_ccache(ccache_dir, 'user1@IPA.TEST-live')
+        cookie = 'MagBearerToken=no-touch'
+        sid = session_registry.register_web_session(
+            cookie, 'user1@IPA.TEST', stale,
+            client_ip='203.0.113.1', max_per_user=0)
+        record = session_registry.get_session_by_id(sid)
+        old_activity = int(time.time()) - 120
+        record['last_activity'] = old_activity
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), record)
+
+        monkeypatch.setattr(session_registry.time, 'time', lambda: 2_000_000)
+        assert session_registry.bind_session_ccache(cookie, live) is True
+        # Bind must not advance activity.
+        assert session_registry.get_session_by_id(sid)['last_activity'] == (
+            old_activity)
+        assert session_registry.session_allows_access(
+            live, idle_timeout=60, client_ip='203.0.113.1',
+            bind_ip=True) is False
+        revoked = session_registry.get_session_by_id(sid)
+        assert revoked['status'] == 'revoked'
+        # Revoke stamps last_activity; success-path touch must not have run.
+        assert revoked['last_activity'] == 2_000_000
+        assert not os.path.isfile(live)
+
 
 @pytest.mark.tier0
 class TestSessionConcurrency:

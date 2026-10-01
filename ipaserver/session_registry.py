@@ -213,6 +213,41 @@ def get_session_by_id(session_id):
         return None
 
 
+def bind_session_ccache(session_cookie, ccache_name):
+    """Point an active cookie's registry entry at the live KRB5CCNAME path.
+
+    Password login registers against a temporary ``kinit_<pid>`` ccache, but
+    subsequent requests use the unique delegated ccache created by
+    mod_auth_gssapi (``GssapiDelegCcacheUnique``). Rebinding lets idle/IP
+    enforcement find the session by the request's real ccache without
+    updating ``last_activity``.
+    """
+    if not session_cookie or not ccache_name:
+        return False
+    try:
+        session_id = session_id_from_cookie(session_cookie)
+        record = get_session_by_id(session_id)
+    except (ValueError, OSError, TypeError):
+        return False
+    if not record or record.get('status') != STATUS_ACTIVE:
+        return False
+    path = normalize_ccache_path(ccache_name)
+    if not path:
+        return False
+    if record.get('ccache_path') == path:
+        return True
+    record['ccache_path'] = path
+    try:
+        _atomic_write(_path_for_id(session_id), record)
+    except OSError as e:
+        logger.debug('Failed rebinding session ccache: %s', e)
+        return False
+    logger.debug(
+        'Rebound web session %s ccache to %s',
+        session_id[:12], path)
+    return True
+
+
 def get_session_by_ccache(ccache_name):
     ccache_path = normalize_ccache_path(ccache_name)
     if not ccache_path:

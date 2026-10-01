@@ -732,6 +732,54 @@ class KerberosSession(HTTP_Status):
         start_response(status, headers)
         return [response]
 
+    @staticmethod
+    def _ipa_session_cookie_from_environ(environ):
+        """Return the raw ``ipa_session`` cookie value, if present."""
+        raw = environ.get('HTTP_COOKIE') or ''
+        if not raw:
+            return None
+        for part in raw.split(';'):
+            part = part.strip()
+            if not part:
+                continue
+            name, sep, value = part.partition('=')
+            if sep and name.strip() == 'ipa_session':
+                return value.strip() or None
+        return None
+
+    @staticmethod
+    def _delegated_session_ccache(ccache_name, before_names, principal=None):
+        """Prefer the unique delegated ccache created for the session cookie.
+
+        ``login_password`` acquires tickets into a temporary ``kinit_<pid>``
+        file that is deleted after login. mod_auth_gssapi with
+        ``GssapiDelegCcacheUnique`` stores the session credentials in a
+        separate file under IPA_CCACHES; registry metadata must track that
+        file so idle timeout / revoke can find and invalidate it.
+        """
+        try:
+            after_names = set(os.listdir(paths.IPA_CCACHES))
+        except OSError:
+            return ccache_name
+        new_names = sorted(after_names - set(before_names or ()))
+        if not new_names:
+            return ccache_name
+
+        principal_s = str(principal) if principal else ''
+        preferred = []
+        for name in new_names:
+            if name.startswith(('kinit_', 'armor_', '.')):
+                continue
+            preferred.append(name)
+        candidates = preferred or new_names
+        pick = candidates[0]
+        if principal_s:
+            for name in candidates:
+                if name.startswith(principal_s):
+                    pick = name
+                    break
+        return os.path.join(paths.IPA_CCACHES, pick)
+
     def get_environ_creds(self, environ):
         # If we have a ccache ...
         ccache_name = environ.get('KRB5CCNAME')
@@ -751,8 +799,17 @@ class KerberosSession(HTTP_Status):
         # Admin-killed / idle-expired / IP-bound / self-logged-out Web
         # sessions stay revoked even if a stale cookie is presented before
         # the ccache file disappears.
+        #
+        # Order (security-critical):
+        # 1) rebind cookie -> live ccache path (no last_activity touch)
+        # 2) enforce revoked / IP / idle using PREVIOUS last_activity
+        # 3) only then touch last_activity for still-valid sessions
         try:
             from ipaserver import session_registry
+            session_cookie = self._ipa_session_cookie_from_environ(environ)
+            if session_cookie:
+                session_registry.bind_session_ccache(
+                    session_cookie, ccache_name)
             idle_timeout = getattr(
                 self.api.env, 'web_session_idle_timeout',
                 session_registry.DEFAULT_IDLE_TIMEOUT)
@@ -800,6 +857,10 @@ class KerberosSession(HTTP_Status):
         # Connect back to ourselves to get mod_auth_gssapi to
         # generate a cookie for us.
         try:
+            try:
+                before_names = set(os.listdir(paths.IPA_CCACHES))
+            except OSError:
+                before_names = set()
             target = self.api.env.host
             # pylint: disable-next=missing-timeout
             r = requests.get('http://{0}/ipa/session/cookie'.format(target),
@@ -826,11 +887,14 @@ class KerberosSession(HTTP_Status):
             max_per_user = getattr(
                 self.api.env, 'web_session_max_per_user',
                 session_registry.DEFAULT_MAX_PER_USER)
+            # Register the delegated session ccache (not temporary kinit_*).
+            session_ccache = self._delegated_session_ccache(
+                ccache_name, before_names, principal=principal)
             if principal:
                 session_registry.register_web_session(
                     session_cookie,
                     principal,
-                    ccache_name,
+                    session_ccache,
                     client_ip=client_ip,
                     max_per_user=max_per_user,
                 )
