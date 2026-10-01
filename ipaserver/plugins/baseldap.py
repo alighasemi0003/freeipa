@@ -1103,6 +1103,18 @@ last, after all sets and adds."""),
                 if rights_allow(r, perm, touched):
                     continue
 
+                # Retrieve (read/search/compare) must not require every
+                # privileged read permission.  Objects commonly split reads
+                # into public/authenticated attribute sets and admin-only
+                # ones (e.g. user "System: Read User Kerberos Login
+                # Attributes" → User Administrators).  Lack of access to an
+                # admin-only set is expected for normal users; LDAP ACIs
+                # already omit those attributes.  Requiring every privileged
+                # read permission would deny legitimate user_show/self-service
+                # profile bootstrap with ACIError 2100.
+                if r in ('read', 'search', 'compare'):
+                    continue
+
                 raise errors.ACIError(
                     info=_("not allowed to perform this operation"))
 
