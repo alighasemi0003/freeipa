@@ -85,7 +85,8 @@ def _registry_dir():
 
 def _key_path():
     return getattr(
-        paths, 'IPA_LOGIN_CAPTCHA_KEY', '/var/lib/ipa/login_captcha.key')
+        paths, 'IPA_LOGIN_CAPTCHA_KEY',
+        '/run/ipa/login_captcha/hmac.key')
 
 
 def ensure_registry_dir():
@@ -257,7 +258,6 @@ def render_svg(answer):
     height = 72
     # Background
     parts = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
         '<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" '
         'viewBox="0 0 {} {}">'.format(width, height, width, height),
         '<rect width="100%" height="100%" fill="#f4f4f4"/>',

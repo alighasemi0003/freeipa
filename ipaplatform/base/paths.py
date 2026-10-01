@@ -405,10 +405,12 @@ class BasePathNamespace:
     IPA_CCACHES = "/run/ipa/ccaches"
     # Metadata-only registry for FreeIPA Web UI/API sessions (admin list/kill)
     IPA_WEB_SESSIONS = "/run/ipa/web_sessions"
-    # Ephemeral offline login CAPTCHA challenge state
+    # Ephemeral offline login CAPTCHA challenge state (ipaapi-owned; see tmpfiles)
     IPA_LOGIN_CAPTCHA = "/run/ipa/login_captcha"
-    # HMAC key for CAPTCHA answer verifiers (mode 0600)
-    IPA_LOGIN_CAPTCHA_KEY = "/var/lib/ipa/login_captcha.key"
+    # HMAC key for CAPTCHA answer verifiers (mode 0600). Lives in the same
+    # ipaapi-writable directory so WSGI workers share one key without needing
+    # write access to /var/lib/ipa.
+    IPA_LOGIN_CAPTCHA_KEY = "/run/ipa/login_captcha/hmac.key"
     CA_BUNDLE_PEM = "/var/lib/ipa-client/pki/ca-bundle.pem"
     KDC_CA_BUNDLE_PEM = "/var/lib/ipa-client/pki/kdc-ca-bundle.pem"
     IPA_RENEWAL_LOCK = "/run/ipa/renewal.lock"

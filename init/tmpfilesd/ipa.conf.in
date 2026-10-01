@@ -1,3 +1,6 @@
 d /run/ipa 0711 root root
 d /run/ipa/ccaches 6770 ipaapi ipaapi
 a+ /run/ipa/ccaches - - - - g:@HTTPD_GROUP@:rwx
+# Offline login CAPTCHA challenge state + HMAC key.
+# WSGI daemon (process-group=ipa) runs as ipaapi, not httpd.
+d /run/ipa/login_captcha 0700 ipaapi ipaapi

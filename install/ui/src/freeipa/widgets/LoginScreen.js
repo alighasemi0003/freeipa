@@ -315,6 +315,8 @@ define(['dojo/_base/declare',
             if (this.captcha_image_node) return;
             var captcha_w = this.get_widget('captcha_answer');
             if (!captcha_w || !captcha_w.container) return;
+            // Widget containers are jQuery objects; dojo/dom-construct needs a DOM node.
+            var field_container = captcha_w.container[0] || captcha_w.container;
             var wrap = construct.create('div', {
                 'class': 'login-captcha',
                 style: { marginBottom: '0.75em' }
@@ -338,7 +340,7 @@ define(['dojo/_base/declare',
             })[0];
             construct.place(this.captcha_refresh_node, wrap);
             // Place above the captcha answer input widget
-            construct.place(wrap, captcha_w.container, 'first');
+            construct.place(wrap, field_container, 'first');
         },
 
         refresh_captcha: function() {
@@ -379,15 +381,17 @@ define(['dojo/_base/declare',
                     this.get_widget('captcha_answer').set_visible(true);
                 }
                 if (this.captcha_image_node) {
-                    // Trusted server-generated SVG only (never user HTML).
+                    // Prefer <img data:> so CSP img-src 'self' data: applies
+                    // cleanly; avoid HTML-parser quirks with inline SVG/XML decl.
                     this.captcha_image_node.style.display = 'inline-block';
-                    this.captcha_image_node.innerHTML = data.image;
-                    // Remove accidental metadata if any
-                    var banned = this.captcha_image_node.querySelectorAll(
-                        'title, desc, [aria-label]');
-                    for (var i = 0; i < banned.length; i++) {
-                        banned[i].parentNode.removeChild(banned[i]);
-                    }
+                    this.captcha_image_node.innerHTML = '';
+                    var img = document.createElement('img');
+                    img.alt = '';
+                    img.width = 220;
+                    img.height = 72;
+                    img.src = 'data:image/svg+xml;charset=utf-8,' +
+                        encodeURIComponent(data.image);
+                    this.captcha_image_node.appendChild(img);
                 }
                 if (this.captcha_refresh_node) {
                     this.captcha_refresh_node.style.display = '';

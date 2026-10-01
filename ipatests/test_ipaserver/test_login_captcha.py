@@ -36,7 +36,7 @@ class TestLoginCaptcha:
         public = login_captcha.create_challenge('203.0.113.10')
         assert 'answer' not in public
         assert 'verifier' not in public
-        assert 'image' in public and public['image'].startswith('<?xml')
+        assert 'image' in public and public['image'].lstrip().startswith('<svg')
         assert 'id' in public
 
     def test_correct_answer_passes(self, captcha_dirs):
