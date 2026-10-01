@@ -1,0 +1,66 @@
+# FreeIPA local development stack
+# Single-service architecture: FreeIPA + systemd manage DS/KDC/PKI/httpd inside one container.
+# Image is built locally (source → RPM → customized freeipa-container). Never pull freeipa/freeipa-server.
+name: freeipa-dev
+
+services:
+  freeipa:
+    image: ${RUNTIME_IMAGE:-local/freeipa-server:4.13.4-dev}
+    container_name: ${CONTAINER_NAME:-freeipa-dev}
+    hostname: ${IPA_HOSTNAME:-ipa.ipa.test}
+    restart: unless-stopped
+    read_only: true
+    # Required for systemd inside the FreeIPA container on cgroup v2 / Docker+WSL
+    # (see https://github.com/freeipa/freeipa-container README).
+    cgroup: host
+    privileged: false
+    stdin_open: true
+    tty: true
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "0"
+    environment:
+      # Prefer explicit install args below; keep IPA_SERVER_IP for official init-data.
+      IPA_SERVER_IP: ${IPA_SERVER_IP:-no-update}
+      IPA_SERVER_INSTALL_OPTS: ${IPA_SERVER_INSTALL_OPTS:-}
+    # Unattended install on first boot; ignored once /data is already configured.
+    # Passwords come from .env (not Dockerfile). Hostname is FQDN: host.domain.
+    command:
+      - ipa-server-install
+      - -U
+      - --hostname=${IPA_HOSTNAME:-ipa.ipa.test}
+      - --domain=${IPA_DOMAIN:-ipa.test}
+      - --realm=${IPA_REALM:-IPA.TEST}
+      - --admin-password=${IPA_ADMIN_PASSWORD:-Secret123}
+      - --ds-password=${IPA_DM_PASSWORD:-Secret123}
+      - --no-ntp
+    volumes:
+      - freeipa-data:/data
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    # Integrated DNS is OFF by default (no port 53). Enable via IPA_ENABLE_DNS=true
+    # which also loads docker-compose.dns.yml.
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${LDAP_PORT:-389}:389"
+      - "${LDAPS_PORT:-636}:636"
+      - "${KERBEROS_PORT:-88}:88"
+      - "${KERBEROS_PORT_UDP:-88}:88/udp"
+      - "${KPASSWD_PORT:-464}:464"
+      - "${KPASSWD_PORT_UDP:-464}:464/udp"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ipactl status 2>/dev/null | grep -qi 'Directory Service: RUNNING'",
+        ]
+      interval: 15s
+      timeout: 15s
+      retries: 40
+      start_period: 300s
+
+volumes:
+  freeipa-data:
+    name: ${VOLUME_NAME:-freeipa-data}
