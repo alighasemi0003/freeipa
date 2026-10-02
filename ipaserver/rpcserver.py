@@ -1350,14 +1350,23 @@ class login_password(Backend, KerberosSession):
             captcha_answer = query_dict.get('captcha_answer', [None])[0]
             client_ip = environ.get('REMOTE_ADDR') or ''
             ok = False
+            captcha_reason = login_captcha.CAPTCHA_REASON_MISSING
             if captcha_id and captcha_answer is not None:
                 try:
-                    ok = login_captcha.verify_and_consume(
-                        captcha_id, captcha_answer, client_ip)
+                    ok, captcha_reason = (
+                        login_captcha.verify_and_consume_result(
+                            captcha_id, captcha_answer, client_ip))
                 except Exception as e:
                     logger.debug('CAPTCHA verify failed: %s', e)
                     ok = False
+                    captcha_reason = login_captcha.CAPTCHA_REASON_INVALID
             if not ok:
+                # Pre-auth security audit: no username, answer, or verifier.
+                logger.info(
+                    'login_captcha verification failed '
+                    '(result=failure reason=%s remote_addr=%s)',
+                    captcha_reason or login_captcha.CAPTCHA_REASON_INVALID,
+                    client_ip)
                 return self.unauthorized(
                     environ,
                     start_response,
@@ -1648,17 +1657,33 @@ class session_verify_credentials(Backend, KerberosSession):
                     logger.debug(
                         'session_verify_credentials failed for %s: %s',
                         str(principal).split('@', 1)[0], e)
+                    logger.info(
+                        'sensitive_reauth verification failed '
+                        '(result=failure principal=%s remote_addr=%s)',
+                        str(principal).split('@', 1)[0],
+                        environ.get('REMOTE_ADDR') or '')
                     return self.unauthorized(
                         environ, start_response,
                         unicode(_('Authentication failed')),
                         'invalid-password')
 
             if not session_registry.mark_session_reauth(record['id']):
+                logger.info(
+                    'sensitive_reauth verification failed '
+                    '(result=failure reason=session_update '
+                    'principal=%s remote_addr=%s)',
+                    str(principal).split('@', 1)[0],
+                    environ.get('REMOTE_ADDR') or '')
                 return self.unauthorized(
                     environ, start_response,
                     unicode(_('Authentication failed')),
                     'denied')
 
+            logger.info(
+                'sensitive_reauth verification succeeded '
+                '(result=success principal=%s remote_addr=%s)',
+                str(principal).split('@', 1)[0],
+                environ.get('REMOTE_ADDR') or '')
             status = HTTP_STATUS_SUCCESS
             headers = [('Content-Type', 'text/plain; charset=utf-8')]
             start_response(status, headers)

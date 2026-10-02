@@ -354,43 +354,66 @@ def create_challenge(client_ip, ttl=None, length=None):
     }
 
 
-def verify_and_consume(challenge_id, answer, client_ip):
+# Safe CAPTCHA failure reason categories for security audit logs (no secrets).
+CAPTCHA_REASON_MISSING = 'missing'
+CAPTCHA_REASON_INVALID = 'invalid'
+CAPTCHA_REASON_EXPIRED = 'expired'
+CAPTCHA_REASON_REUSED = 'reused'
+CAPTCHA_REASON_IP_MISMATCH = 'ip_mismatch'
+
+
+def verify_and_consume_result(challenge_id, answer, client_ip):
     """Verify CAPTCHA and always consume the challenge.
 
-    Returns True only on exact match with fresh unused challenge from same IP.
+    Returns ``(True, None)`` on success, or ``(False, reason)`` where reason is
+    one of the CAPTCHA_REASON_* categories. Never returns answers or verifiers.
     """
     client_ip = client_ip or ''
+    if not challenge_id or answer is None:
+        return False, CAPTCHA_REASON_MISSING
+
     answer_norm = normalize_answer(answer)
     try:
         path = _path_for_id(challenge_id)
     except ValueError:
-        return False
+        return False, CAPTCHA_REASON_INVALID
 
     try:
         record = _read(path)
     except (OSError, ValueError, TypeError):
-        return False
+        return False, CAPTCHA_REASON_INVALID
 
     # Always consume (success, failure, expiry, IP mismatch).
     _delete(challenge_id)
 
     if record.get('used'):
-        return False
+        return False, CAPTCHA_REASON_REUSED
     now = int(time.time())
     try:
         expires = int(record.get('expires', 0))
     except (TypeError, ValueError):
-        return False
+        return False, CAPTCHA_REASON_INVALID
     if expires <= now:
-        return False
+        return False, CAPTCHA_REASON_EXPIRED
     if (record.get('client_ip') or '') != client_ip:
-        return False
+        return False, CAPTCHA_REASON_IP_MISMATCH
     if not answer_norm:
-        return False
+        return False, CAPTCHA_REASON_INVALID
 
     expected = record.get('verifier') or ''
     actual = answer_verifier(answer_norm)
-    return hmac.compare_digest(str(expected), str(actual))
+    if hmac.compare_digest(str(expected), str(actual)):
+        return True, None
+    return False, CAPTCHA_REASON_INVALID
+
+
+def verify_and_consume(challenge_id, answer, client_ip):
+    """Verify CAPTCHA and always consume the challenge.
+
+    Returns True only on exact match with fresh unused challenge from same IP.
+    """
+    ok, _reason = verify_and_consume_result(challenge_id, answer, client_ip)
+    return ok
 
 
 def svg_contains_answer_leak(svg, answer):

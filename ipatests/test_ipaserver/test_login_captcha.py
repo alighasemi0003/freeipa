@@ -68,6 +68,56 @@ class TestLoginCaptcha:
         assert login_captcha.verify_and_consume(
             public['id'], 'WRONG1', '203.0.113.10') is False
 
+    def test_verify_result_reason_categories(self, captcha_dirs):
+        public = login_captcha.create_challenge('203.0.113.10', length=6)
+        path = login_captcha._path_for_id(public['id'])
+        answer = 'ABCD23'
+        login_captcha._atomic_write(path, {
+            'id': public['id'],
+            'verifier': login_captcha.answer_verifier(answer),
+            'created': int(time.time()),
+            'expires': int(time.time()) + 120,
+            'used': False,
+            'client_ip': '203.0.113.10',
+        })
+        ok, reason = login_captcha.verify_and_consume_result(
+            public['id'], 'WRONG1', '203.0.113.10')
+        assert ok is False
+        assert reason == login_captcha.CAPTCHA_REASON_INVALID
+
+        # recreate for IP mismatch
+        login_captcha._atomic_write(path, {
+            'id': public['id'],
+            'verifier': login_captcha.answer_verifier(answer),
+            'created': int(time.time()),
+            'expires': int(time.time()) + 120,
+            'used': False,
+            'client_ip': '203.0.113.10',
+        })
+        ok, reason = login_captcha.verify_and_consume_result(
+            public['id'], answer, '198.51.100.1')
+        assert ok is False
+        assert reason == login_captcha.CAPTCHA_REASON_IP_MISMATCH
+
+        ok, reason = login_captcha.verify_and_consume_result(
+            None, 'X', '203.0.113.10')
+        assert ok is False
+        assert reason == login_captcha.CAPTCHA_REASON_MISSING
+
+        # expired
+        login_captcha._atomic_write(path, {
+            'id': public['id'],
+            'verifier': login_captcha.answer_verifier(answer),
+            'created': int(time.time()) - 200,
+            'expires': int(time.time()) - 10,
+            'used': False,
+            'client_ip': '203.0.113.10',
+        })
+        ok, reason = login_captcha.verify_and_consume_result(
+            public['id'], answer, '203.0.113.10')
+        assert ok is False
+        assert reason == login_captcha.CAPTCHA_REASON_EXPIRED
+
     def test_replay_fails(self, captcha_dirs):
         cid = 'replayTestToken_abc123'
         path = login_captcha._path_for_id(cid)
@@ -178,3 +228,45 @@ class TestLoginPasswordCaptchaGate:
             for h in sr.headers
         )
         assert kinit_called == []
+
+    def test_captcha_failure_emits_info_audit_without_secrets(
+            self, captcha_dirs, monkeypatch):
+        from ipaserver import rpcserver
+        from ipaserver.rpcserver import login_password
+        from ipatests.test_ipaserver.test_rpcserver import StartResponse
+
+        api = mock.MagicMock()
+        api.env.login_captcha_enabled = True
+        api.env.kinit_lifetime = None
+        app = login_password(api)
+        app.check_referer = mock.MagicMock(return_value=True)
+        monkeypatch.setattr(app, 'kinit', mock.MagicMock())
+
+        info_msgs = []
+
+        def capture_info(msg, *args, **kwargs):
+            info_msgs.append(msg % args if args else msg)
+
+        monkeypatch.setattr(rpcserver.logger, 'info', capture_info)
+
+        body = (
+            'user=somebody&password=Secret123&captcha_id=badid'
+            '&captcha_answer=WRONG99'
+        )
+        environ = {
+            'REQUEST_METHOD': 'POST',
+            'CONTENT_TYPE': 'application/x-www-form-urlencoded',
+            'CONTENT_LENGTH': str(len(body)),
+            'REMOTE_ADDR': '203.0.113.10',
+            'wsgi.input': __import__('io').BytesIO(body.encode('utf-8')),
+        }
+        sr = StartResponse()
+        list(app(environ, sr))
+        assert sr.status.startswith('401')
+        joined = '\n'.join(info_msgs)
+        assert 'login_captcha verification failed' in joined
+        assert 'result=failure' in joined
+        assert 'remote_addr=203.0.113.10' in joined
+        assert 'Secret123' not in joined
+        assert 'WRONG99' not in joined
+        assert 'somebody' not in joined
