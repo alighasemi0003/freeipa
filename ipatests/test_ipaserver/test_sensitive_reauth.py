@@ -287,12 +287,40 @@ class TestSensitiveReauthGate:
 
 @pytest.mark.tier0
 class TestSessionReauthState:
-    def test_mark_and_freshness(self, sess_dirs):
+    def test_register_initializes_last_reauth_at(self, sess_dirs):
+        before = int(time.time())
         sid = session_registry.register_web_session(
             'cookie-value-xyz', 'admin@IPA.TEST', '/tmp/cc1',
             client_ip='203.0.113.10')
+        after = int(time.time())
         rec = session_registry.get_session_by_id(sid)
-        assert rec.get('last_reauth_at') is None
+        assert rec.get('last_reauth_at') is not None
+        assert before <= int(rec['last_reauth_at']) <= after
+        assert sensitive_reauth.is_reauth_fresh(rec, 300)
+
+    def test_touch_activity_does_not_change_last_reauth_at(self, sess_dirs):
+        sid = session_registry.register_web_session(
+            'cookie-activity', 'admin@IPA.TEST', '/tmp/ccA',
+            client_ip='203.0.113.10', max_per_user=0)
+        rec = session_registry.get_session_by_id(sid)
+        stamped = int(rec['last_reauth_at'])
+        rec['last_activity'] = stamped - 50
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), rec)
+        session_registry.touch_session_activity(sid)
+        rec2 = session_registry.get_session_by_id(sid)
+        assert int(rec2['last_reauth_at']) == stamped
+        assert int(rec2['last_activity']) >= stamped - 50
+
+    def test_mark_and_freshness(self, sess_dirs):
+        sid = session_registry.register_web_session(
+            'cookie-value-xyz2', 'admin@IPA.TEST', '/tmp/cc1b',
+            client_ip='203.0.113.10')
+        rec = session_registry.get_session_by_id(sid)
+        # Fresh login already sets last_reauth_at; clear to test mark().
+        rec['last_reauth_at'] = None
+        session_registry._atomic_write(
+            session_registry._path_for_id(sid), rec)
         assert session_registry.mark_session_reauth(sid)
         rec = session_registry.get_session_by_id(sid)
         assert rec.get('last_reauth_at')
@@ -306,3 +334,35 @@ class TestSessionReauthState:
         assert session_registry.mark_session_reauth(sid)
         rec = session_registry.get_session_by_id(sid)
         assert rec['id'] == sid
+
+    def test_fresh_login_satisfies_sensitive_gate(self, sess_dirs, monkeypatch):
+        api = FakeApi()
+        sid = session_registry.register_web_session(
+            'cookie-fresh-gate', 'admin@IPA.TEST', '/tmp/ccg',
+            client_ip='203.0.113.1', max_per_user=0)
+        monkeypatch.setattr(
+            sensitive_reauth, 'get_effective_policy',
+            lambda a: ('default', 300, sensitive_reauth.BUILTIN_SENSITIVE_COMMANDS))
+        monkeypatch.setattr(
+            sensitive_reauth, '_web_session_record',
+            lambda c: session_registry.get_session_by_id(sid))
+        from ipalib.request import context
+        context.ccache_name = 'FILE:/tmp/ccg'
+        context.principal = 'admin@IPA.TEST'
+        cmd = mock.MagicMock()
+        cmd.name = 'user_del'
+        cmd.api = api
+        sensitive_reauth.enforce_if_needed(cmd, {'uid': 'bob'})
+
+    def test_failed_mark_does_not_clear_existing(self, sess_dirs):
+        sid = session_registry.register_web_session(
+            'cookie-fail-mark', 'admin@IPA.TEST', '/tmp/ccf',
+            max_per_user=0)
+        rec = session_registry.get_session_by_id(sid)
+        original = int(rec['last_reauth_at'])
+        # Revoke then mark should fail without inventing a new stamp on active path
+        session_registry.revoke_session(sid)
+        assert session_registry.mark_session_reauth(sid) is False
+        # revoked record still has prior stamp (revoke updates last_activity only)
+        revoked = session_registry.get_session_by_id(sid)
+        assert int(revoked.get('last_reauth_at') or 0) == original

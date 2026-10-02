@@ -122,7 +122,9 @@ def register_web_session(session_cookie, principal, ccache_name,
         'ccache_path': ccache_path,
         'created': now,
         'last_activity': now,
-        'last_reauth_at': None,
+        # Successful interactive login establishes credential freshness for
+        # sensitive-action step-up (independent of idle last_activity).
+        'last_reauth_at': now,
         'client_ip': client_ip or '',
         'status': STATUS_ACTIVE,
     }

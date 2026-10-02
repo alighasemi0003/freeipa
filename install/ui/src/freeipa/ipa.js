@@ -749,13 +749,13 @@ IPA.prompt_reauth = function(on_success, on_cancel) {
     });
     dialog.message = text.get(
         '@i18n:login.reauth_message',
-        'Re-authentication is required to continue with this sensitive operation.'
+        'For security, confirm your password to continue this sensitive operation.'
     );
     dialog.create_content = function() {
         dialog.container.append($('<p/>', { text: dialog.message }));
         var form = $('<div class="form-horizontal"/>');
         form.append($('<label for="ipa-reauth-password"/>').text(
-            text.get('@i18n:password.current_password', 'Current password')));
+            text.get('@i18n:password.password', 'Password')));
         dialog.password_input = $('<input/>', {
             id: 'ipa-reauth-password',
             name: 'password',

@@ -401,23 +401,16 @@ rpc.command = function(spec) {
                 window.location.reload();
 
             } else if (data.error) {
-                var err_code = data.error.code;
-                var err_name = data.error.name || '';
-                if ((err_code === 1205 || err_name === 'ReauthRequired') &&
-                        !that._reauth_retried) {
+                if (rpc.is_reauth_error(data.error) && !that._reauth_retried) {
                     that._reauth_retried = true;
                     that.handle_notify_execution_end();
                     IPA.prompt_reauth(function() {
                         // Retry original RPC exactly once after verify.
                         that.execute();
                     }, function() {
-                        error_handler.call(this, xhr, text_status, {
-                            name: text.get('@i18n:errors.ipa_error', 'IPA Error') +
-                                  ' ' + data.error.code + ': ' + data.error.name,
-                            code: data.error.code,
-                            message: data.error.message,
-                            data: data
-                        });
+                        // Cancel: do not run the command and do not show
+                        // a generic REAUTH_REQUIRED / Operations Error.
+                        that.handle_notify_execution_end();
                     });
                     return;
                 }
@@ -614,6 +607,26 @@ rpc.command = function(spec) {
  * @param {Function} spec.on_success - callback function if command succeeds
  * @param {Function} spec.on_error - callback function if command fails
  */
+/**
+ * True when an IPA error object is REAUTH_REQUIRED / errno 1205.
+ *
+ * Accepts either a JSON-RPC error object (`{code,name}`) or a batch member
+ * result (`{error, error_code, error_name}`) where `error` may be a string.
+ * @param {Object|string} error
+ * @return {Boolean}
+ */
+rpc.is_reauth_error = function(error) {
+    if (!error) {
+        return false;
+    }
+    if (typeof error === 'string') {
+        return false;
+    }
+    var code = error.code || error.error_code;
+    var name = error.name || error.error_name || '';
+    return code === 1205 || name === 'ReauthRequired';
+};
+
 rpc.batch_command = function(spec) {
 
     spec = spec || {};
@@ -661,6 +674,13 @@ rpc.batch_command = function(spec) {
 
         that.options.version = window.ipa_loader.api_version;
 
+        // Rebuild args from current commands so a post-reauth subset retry
+        // does not resubmit already-successful mutations.
+        that.args = [];
+        for (var ai = 0; ai < that.commands.length; ai++) {
+            that.add_arg(that.commands[ai].to_json());
+        }
+
         var command = rpc.command({
             name: that.name,
             entity: that.entity,
@@ -677,16 +697,152 @@ rpc.batch_command = function(spec) {
     };
 
     /**
+     * Show Operations Error for non-empty error list, else emit success.
+     * @protected
+     */
+    that._show_batch_errors_or_success = function(
+            data, text_status, xhr, error_list) {
+        if (that.show_error && error_list.errors.length > 0) {
+            var ajax = this;
+            var dialog = IPA.error_dialog({
+                xhr: xhr,
+                text_status: text_status,
+                error_thrown: {
+                    name: text.get('@i18n:dialogs.batch_error_title', 'Operations Error'),
+                    message: that.error_message
+                },
+                command: that,
+                errors: error_list.errors,
+                visible_buttons: [ 'ok' ]
+            });
+
+            dialog.on_ok = function() {
+                dialog.close();
+                that.emit('success', {
+                    that: ajax,
+                    data: data,
+                    text_status: text_status,
+                    xhr: xhr
+                });
+            };
+
+            dialog.open();
+
+        } else {
+            that.emit('success', {
+                data: data,
+                text_status: text_status,
+                xhr: xhr
+            });
+        }
+    };
+
+    /**
+     * After verify_credentials: retry ONLY commands that returned 1205.
+     * Already-successful batch members are never resubmitted.
+     * @protected
+     */
+    that._retry_reauth_batch_commands = function(
+            reauth_commands, other_errors, text_status, xhr) {
+        var pending = reauth_commands.length;
+        var retry_errors = rpc.error_list();
+        var completed_results = [];
+
+        if (!pending) {
+            that._show_batch_errors_or_success(
+                {result: {results: completed_results}},
+                text_status, xhr, other_errors);
+            return;
+        }
+
+        var finish_one = function() {
+            pending -= 1;
+            if (pending > 0) {
+                return;
+            }
+            // Merge non-reauth errors with any retry failures.
+            var merged = rpc.error_list();
+            merged.add_range(other_errors);
+            merged.add_range(retry_errors);
+            that.errors = merged;
+            that._show_batch_errors_or_success(
+                {result: {results: completed_results}},
+                text_status, xhr, merged);
+        };
+
+        for (var i = 0; i < reauth_commands.length; i++) {
+            (function(command) {
+                // Individual RPC (not a full batch) so only this mutation runs.
+                var retry = rpc.command({
+                    name: command.name,
+                    entity: command.entity,
+                    method: command.method,
+                    args: command.args,
+                    options: command.options,
+                    retry: false
+                });
+                // Prevent a second nested reauth prompt on this attempt.
+                retry._reauth_retried = true;
+                retry.on_success = function(data, ts, x) {
+                    if (data && data.error) {
+                        var code = data.error.code;
+                        var name = text.get('@i18n:errors.ipa_error', 'IPA Error') +
+                            (code ? ' ' + code : '');
+                        retry_errors.add(
+                            command, name, data.error.message || '', ts);
+                        if (command.on_error) {
+                            command.on_error.call(this, x, ts, {
+                                name: name,
+                                code: code,
+                                message: data.error.message,
+                                data: data
+                            });
+                        }
+                    } else {
+                        var result = data.result || data;
+                        command.emit('success', {
+                            data: result,
+                            text_status: ts,
+                            xhr: x
+                        });
+                        completed_results.push(result);
+                    }
+                    finish_one();
+                };
+                retry.on_error = function(x, ts, error_thrown) {
+                    retry_errors.add(
+                        command,
+                        (error_thrown && error_thrown.name) ||
+                            text.get('@i18n:errors.ipa_error', 'IPA Error'),
+                        (error_thrown && error_thrown.message) || '',
+                        ts);
+                    if (command.on_error) {
+                        command.on_error.call(this, x, ts, error_thrown);
+                    }
+                    finish_one();
+                };
+                retry.execute();
+            })(reauth_commands[i]);
+        }
+    };
+
+    /**
      * Internal XHR success handler
      *
      * Parses data and looks for errors. `on_success` or `on_error` is then
      * called.
+     *
+     * REAUTH_REQUIRED (1205) inside a batch must open the credential modal
+     * and retry only the failing command(s) — never an Operations Error first,
+     * and never a full-batch resubmit of already-successful mutations.
      * @protected
      * @param {Object} data
      * @param {string} text_status
      * @param {XMLHttpRequest} xhr
      */
     that.batch_command_on_success = function(data, text_status, xhr) {
+
+        var reauth_commands = [];
 
         for (var i=0; i<that.commands.length; i++) {
             var command = that.commands[i];
@@ -713,6 +869,12 @@ rpc.batch_command = function(spec) {
                 );
 
             } else if (result.error) {
+                if (rpc.is_reauth_error(result.error) ||
+                        rpc.is_reauth_error(result)) {
+                    // Defer: prompt for step-up, then retry this command alone.
+                    reauth_commands.push(command);
+                    continue;
+                }
                 var code = result.error.code || result.error_code;
                 name = text.get('@i18n:errors.ipa_error', 'IPA Error')+(code ? ' '+code : '');
                 message = result.error.message || result.error;
@@ -743,39 +905,38 @@ rpc.batch_command = function(spec) {
             }
         }
 
-        if (that.show_error && that.errors.errors.length > 0) {
-            var ajax = this;
-            var dialog = IPA.error_dialog({
-                xhr: xhr,
-                text_status: text_status,
-                error_thrown: {
-                    name: text.get('@i18n:dialogs.batch_error_title', 'Operations Error'),
-                    message: that.error_message
-                },
-                command: that,
-                errors: that.errors.errors,
-                visible_buttons: [ 'ok' ]
+        if (reauth_commands.length && !that._reauth_retried) {
+            that._reauth_retried = true;
+            var other_errors = that.errors;
+            that.errors = rpc.error_list();
+            IPA.prompt_reauth(function() {
+                that._retry_reauth_batch_commands(
+                    reauth_commands, other_errors, text_status, xhr);
+            }, function() {
+                // Cancel: do not execute sensitive commands; only surface
+                // unrelated batch errors (if any).
+                that.errors = other_errors;
+                that._show_batch_errors_or_success(
+                    data, text_status, xhr, other_errors);
             });
-
-            dialog.on_ok = function() {
-                dialog.close();
-                that.emit('success', {
-                    that: ajax,
-                    data: data,
-                    text_status: text_status,
-                    xhr: xhr
-                });
-            };
-
-            dialog.open();
-
-        } else {
-            that.emit('success', {
-                data: data,
-                text_status: text_status,
-                xhr: xhr
-            });
+            return;
         }
+
+        // Reauth already attempted or not applicable — treat remaining
+        // reauth failures as normal errors.
+        for (var ri = 0; ri < reauth_commands.length; ri++) {
+            var rcmd = reauth_commands[ri];
+            that.errors.add(
+                rcmd,
+                text.get('@i18n:errors.ipa_error', 'IPA Error') + ' 1205',
+                text.get(
+                    '@i18n:login.reauth_required',
+                    'Re-authentication required for this operation'),
+                text_status);
+        }
+
+        that._show_batch_errors_or_success(
+            data, text_status, xhr, that.errors);
     };
 
     /**
