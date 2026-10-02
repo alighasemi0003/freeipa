@@ -244,6 +244,13 @@ DEFAULT_CONFIG = (
 
     # WebUI stuff:
     ('webui_prod', True),
+    # When True, Classic Web UI automatically probes Kerberos SSO
+    # (/ipa/session/login_kerberos) during bootstrap. That emits
+    # WWW-Authenticate: Negotiate and can cause Chrome/Edge native
+    # credential dialogs when no TGT is available. Default False:
+    # show the HTML login form first; Kerberos remains available via
+    # the explicit Kerberos login path.
+    ('webui_auto_kerberos_login', False),
 
     # Session stuff:
     ('kinit_lifetime', None),

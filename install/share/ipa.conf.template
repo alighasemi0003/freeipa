@@ -153,6 +153,14 @@ Alias /ipa/session/cookie "/usr/share/ipa/gssapi.login"
   Require all granted
 </Location>
 
+# Anonymous Web UI auth-state probe (no Negotiate challenge).
+# Used only to decide whether to show the HTML login form vs continue
+# authenticated bootstrap. Does not grant API access.
+<Location "/ipa/session/auth_state">
+  Satisfy Any
+  Require all granted
+</Location>
+
 # Login with user certificate/smartcard configuration
 # This configuration needs to be loaded after <Location "/ipa">
 <Location "/ipa/session/login_x509">

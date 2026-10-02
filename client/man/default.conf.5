@@ -134,6 +134,16 @@ as\-is and is never interpreted as HTML, JavaScript, or Markdown. When this
 option is missing or empty, no warning banner is shown. Example:
 "Authorized use only. User activity may be monitored."
 .TP
+.B webui_auto_kerberos_login <boolean>
+When True, the Classic FreeIPA Web UI automatically probes Kerberos SSO
+(/ipa/session/login_kerberos) during page bootstrap. That issues
+WWW\-Authenticate: Negotiate and may cause Chrome/Edge to show a native
+username/password dialog when no usable Kerberos TGT is available. When
+False (the default), the HTML login form is shown first without an automatic
+Negotiate challenge. Explicit Kerberos login, password login, and X.509
+login remain available. Does not weaken GSSAPI protection on
+/ipa/session/json or other authenticated RPC endpoints.
+.TP
 .B login_captcha_enabled <boolean>
 When True (the default), FreeIPA Web password login
 (/ipa/session/login_password) requires a successful offline CAPTCHA challenge

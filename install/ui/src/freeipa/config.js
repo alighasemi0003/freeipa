@@ -80,6 +80,18 @@ define([
         captcha_url: '/ipa/session/captcha',
 
         /**
+         * Anonymous auth-state probe (no Negotiate challenge).
+         * Returns {authenticated, kerberos_auto_login} only.
+         */
+        auth_state_url: '/ipa/session/auth_state',
+
+        /**
+         * When true, Classic UI may auto-call Kerberos SSO during bootstrap.
+         * Populated from auth_state; default false avoids Chrome Negotiate UI.
+         */
+        kerberos_auto_login: false,
+
+        /**
          * Sensitive-action step-up credential verification (existing session)
          */
         verify_credentials_url: '/ipa/session/verify_credentials',

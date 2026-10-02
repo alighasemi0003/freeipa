@@ -31,9 +31,10 @@ define([
     './ipa',
     './text',
     './util',
+    './config',
     'exports'
    ],
-   function(lang, Deferred, on, topic, auth, IPA, text, util, rpc /*exports*/) {
+   function(lang, Deferred, on, topic, auth, IPA, text, util, config, rpc /*exports*/) {
 
 /**
  * Call an IPA command over JSON-RPC.
@@ -300,6 +301,11 @@ rpc.command = function(spec) {
             }
 
             if (xhr.status === 401) {
+
+                if (!config.kerberos_auto_login) {
+                    proceed();
+                    return;
+                }
 
                 IPA.get_credentials().then(function(login_status) {
                     if (login_status === 200) {

@@ -545,3 +545,45 @@ def session_allows_access(ccache_name, idle_timeout=None, now=None,
             ccache_name, idle_timeout=idle_timeout, now=now)
         return False
     return True
+
+
+def web_session_cookie_is_active(session_cookie, client_ip=None,
+                                 idle_timeout=None, bind_ip=None):
+    """Return True if the opaque cookie maps to a usable Web session.
+
+    Used by the anonymous auth-state probe. Does not mint cookies, does not
+    expose principal/username, and does not update last_activity. Enforces
+    revoked/idle/IP binding consistently with session_allows_access; mismatch
+    or idle expires revoke the session.
+    """
+    if not session_cookie:
+        return False
+    try:
+        session_id = session_id_from_cookie(session_cookie)
+    except Exception:
+        return False
+    record = get_session_by_id(session_id)
+    if record is None:
+        return False
+    if record.get('status') == STATUS_REVOKED:
+        return False
+    if not session_ip_allows(record, client_ip, bind_ip=bind_ip):
+        logger.info(
+            'Web session %s IP binding failed during auth_state '
+            '(stored=%r current=%r); revoking',
+            (record.get('id') or '')[:12],
+            record.get('client_ip') or '',
+            client_ip or '')
+        revoke_session(record['id'])
+        return False
+    if is_session_idle(record, idle_timeout=idle_timeout):
+        logger.info(
+            'Web session %s idle timeout exceeded during auth_state; '
+            'revoking',
+            (record.get('id') or '')[:12])
+        revoke_session(record['id'])
+        return False
+    ccache_path = normalize_ccache_path(record.get('ccache_path'))
+    if ccache_path and not os.path.isfile(ccache_path):
+        return False
+    return record.get('status') == STATUS_ACTIVE

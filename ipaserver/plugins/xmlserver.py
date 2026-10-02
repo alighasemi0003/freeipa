@@ -31,7 +31,8 @@ if api.env.context in ('server', 'lite'):
     from ipaserver.rpcserver import (
         wsgi_dispatch, xmlserver, jsonserver_i18n_messages, jsonserver_kerb,
         jsonserver_session, login_kerberos, login_x509, login_password,
-        login_captcha_challenge, change_password, session_verify_credentials,
+        login_captcha_challenge, session_auth_state, change_password,
+        session_verify_credentials,
         sync_token, xmlserver_session)
     register()(wsgi_dispatch)
     register()(xmlserver)
@@ -42,6 +43,7 @@ if api.env.context in ('server', 'lite'):
     register()(login_x509)
     register()(login_password)
     register()(login_captcha_challenge)
+    register()(session_auth_state)
     register()(change_password)
     register()(session_verify_credentials)
     register()(sync_token)

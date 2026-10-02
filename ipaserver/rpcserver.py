@@ -1250,6 +1250,87 @@ class login_captcha_challenge(Backend, HTTP_Status):
         return [body]
 
 
+def _resolve_webui_auto_kerberos_login(value):
+    """Normalize webui_auto_kerberos_login to bool (default False)."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in ('1', 'true', 'yes', 'on'):
+        return True
+    if text in ('0', 'false', 'no', 'off', ''):
+        return False
+    return False
+
+
+class session_auth_state(Backend, HTTP_Status):
+    """Anonymous bootstrap probe: does a usable IPA Web session already exist?
+
+    Does not authenticate a user, mint cookies, run IPA commands, or emit
+    WWW-Authenticate. Returns only boolean session presence plus whether the
+    Classic UI may auto-probe Kerberos SSO.
+    """
+
+    content_type = 'application/json'
+    key = '/session/auth_state'
+
+    def _on_finalize(self):
+        super(session_auth_state, self)._on_finalize()
+        self.api.Backend.wsgi_dispatch.mount(self, self.key)
+
+    def __call__(self, environ, start_response):
+        method = environ.get('REQUEST_METHOD', '').upper()
+        if method not in ('GET', 'HEAD'):
+            status = '405 Method Not Allowed'
+            headers = [
+                ('Allow', 'GET, HEAD'),
+                ('Content-Type', 'text/plain; charset=utf-8'),
+            ]
+            start_response(status, headers)
+            return [b'']
+
+        from ipaserver import session_registry
+
+        cookie = KerberosSession._ipa_session_cookie_from_environ(environ)
+        client_ip = environ.get('REMOTE_ADDR') or ''
+        idle_timeout = getattr(
+            self.api.env, 'web_session_idle_timeout',
+            session_registry.DEFAULT_IDLE_TIMEOUT)
+        bind_ip = getattr(
+            self.api.env, 'web_session_bind_ip',
+            session_registry.DEFAULT_BIND_IP)
+        authenticated = False
+        try:
+            authenticated = session_registry.web_session_cookie_is_active(
+                cookie,
+                client_ip=client_ip,
+                idle_timeout=idle_timeout,
+                bind_ip=bind_ip)
+        except Exception as e:
+            logger.debug('auth_state session check failed: %s', e)
+            authenticated = False
+
+        auto_krb = _resolve_webui_auto_kerberos_login(
+            getattr(self.api.env, 'webui_auto_kerberos_login', None))
+        # Minimal payload — never include principal, username, or session id.
+        body = json.dumps({
+            'authenticated': bool(authenticated),
+            'kerberos_auto_login': bool(auto_krb),
+        }).encode('utf-8')
+        headers = [
+            ('Content-Type', 'application/json; charset=utf-8'),
+            ('Cache-Control', 'no-store'),
+            ('Content-Length', str(len(body))),
+        ]
+        start_response(HTTP_STATUS_SUCCESS, headers)
+        if method == 'HEAD':
+            return [b'']
+        return [body]
+
+
 class login_password(Backend, KerberosSession):
 
     content_type = 'text/plain'

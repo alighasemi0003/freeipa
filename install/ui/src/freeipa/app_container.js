@@ -27,8 +27,12 @@ define([
     './phases',
     './reg',
     './Application_controller',
+    './config',
+    './ipa',
+    './jquery',
     'exports'
-],function(lang, Deferred, on, when, plugin_loader, phases, reg, Application_controller, app) {
+],function(lang, Deferred, on, when, plugin_loader, phases, reg,
+         Application_controller, config, IPA, $, app) {
 
     /**
      * Application wrapper
@@ -100,11 +104,54 @@ define([
 
             phases.on('metadata', function() {
                 var deferred = new Deferred();
+                var self = this;
 
-                this.app.get_configuration(function(success) {
-                    deferred.resolve(success);
-                }, function(error) {
-                    deferred.reject(error);
+                function start_configuration() {
+                    self.app.get_configuration(function(success) {
+                        deferred.resolve(success);
+                    }, function(error) {
+                        deferred.reject(error);
+                    });
+                }
+
+                function show_login_then_configure() {
+                    var login_facet = reg.facet.get('login');
+                    self.app.show_facet(login_facet);
+                    on.once(login_facet, 'logged_in', function() {
+                        start_configuration();
+                    });
+                }
+
+                // Avoid POST /ipa/session/json (Negotiate 401) before we know
+                // whether an IPA Web session already exists.
+                $.ajax({
+                    url: config.auth_state_url,
+                    type: 'GET',
+                    dataType: 'json',
+                    cache: false,
+                    success: function(data) {
+                        config.kerberos_auto_login = !!(
+                            data && data.kerberos_auto_login);
+                        if (data && data.authenticated) {
+                            start_configuration();
+                            return;
+                        }
+                        if (config.kerberos_auto_login) {
+                            IPA.get_credentials().then(function(status) {
+                                if (status === 200) {
+                                    start_configuration();
+                                } else {
+                                    show_login_then_configure();
+                                }
+                            });
+                        } else {
+                            show_login_then_configure();
+                        }
+                    },
+                    error: function() {
+                        config.kerberos_auto_login = false;
+                        show_login_then_configure();
+                    }
                 });
 
                 return deferred.promise;
