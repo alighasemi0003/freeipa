@@ -400,6 +400,28 @@ def revoke_session_by_ccache(ccache_name):
     return revoke_session(record['id'])
 
 
+def revoke_all_sessions_for_user(username):
+    """Revoke every active Web session belonging to ``username``.
+
+    Returns the list of revoked session ids (possibly empty). Each revoke
+    also removes the associated delegated ccache when present.
+    """
+    if not username:
+        return []
+    revoked_ids = []
+    # Snapshot first: revoke mutates registry files under iteration.
+    for record in list(list_active_sessions_for_user(username)):
+        sid = record.get('id')
+        if not sid:
+            continue
+        if revoke_session(sid):
+            revoked_ids.append(sid)
+            logger.info(
+                'Force sign-out revoked web session %s for user %s',
+                sid[:12], username)
+    return revoked_ids
+
+
 def is_session_revoked_for_ccache(ccache_name):
     record = get_session_by_ccache(ccache_name)
     if record is None:

@@ -1688,6 +1688,12 @@ class i18n_messages(Command):
                 "status_link": _("Click to ${action}"),
                 "unlock": _("Unlock"),
                 "unlock_confirm": _("Are you sure you want to unlock user ${object}?"),
+                "force_sign_out": _("Force Sign Out"),
+                "force_sign_out_confirm": _(
+                    "Sign out all active web sessions for this user? "
+                    "The account will remain enabled and the user can "
+                    "sign in again."
+                ),
             },
             "vault": {
                 "add": _("Add vault"),

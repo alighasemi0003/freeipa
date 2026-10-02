@@ -720,7 +720,9 @@
                     "status_confirmation": "Are you sure you want to ${action} the user?<br/>The change will take effect immediately.", 
                     "status_link": "Click to ${action}", 
                     "unlock": "Unlock", 
-                    "unlock_confirm": "Are you sure you want to unlock user ${object}?"
+                    "unlock_confirm": "Are you sure you want to unlock user ${object}?",
+                    "force_sign_out": "Force Sign Out",
+                    "force_sign_out_confirm": "Sign out all active web sessions for this user? The account will remain enabled and the user can sign in again."
                 }, 
                 "vault": {
                     "add_warn_arch_ret": "Secrets can be added/retrieved to vault only by using vault-archive and vault-retrieve from CLI.", 

@@ -127,9 +127,13 @@ return {
                 {
                     $type: 'batch_enable',
                     hide_cond: ['self-service']
+                },
+                {
+                    $type: 'force_sign_out_batch',
+                    hide_cond: ['self-service']
                 }
             ],
-            header_actions: ['automember_rebuild'],
+            header_actions: ['automember_rebuild', 'force_sign_out'],
             control_buttons: [
                 {
                     name: 'disable',
@@ -483,6 +487,10 @@ return {
                     confirm_msg: '@i18n:objects.user.unlock_confirm'
                 },
                 {
+                    $type: 'force_sign_out',
+                    hide_cond: ['preserved-user']
+                },
+                {
                     $type: 'automember_rebuild',
                     name: 'automember_rebuild',
                     hide_cond: ['preserved-user'],
@@ -501,7 +509,8 @@ return {
             ],
             header_actions: [
                 'reset_password', 'enable', 'disable', 'stage', 'undel',
-                'delete_active_user', 'delete', 'unlock', 'add_otptoken',
+                'delete_active_user', 'delete', 'unlock', 'force_sign_out',
+                'add_otptoken',
                 'automember_rebuild', 'request_cert', 'subid_generate'
             ],
             state: {
@@ -965,6 +974,79 @@ IPA.user.delete_active_user_action = function(spec) {
     return that;
 };
 
+IPA.user.force_sign_out_action = function(spec) {
+
+    spec = spec || {};
+    spec.name = spec.name || 'force_sign_out';
+    spec.label = spec.label || '@i18n:objects.user.force_sign_out';
+    spec.hide_cond = spec.hide_cond || ['preserved-user'];
+    spec.needs_confirm = true;
+    spec.confirm_msg = spec.confirm_msg ||
+        '@i18n:objects.user.force_sign_out_confirm';
+
+    var that = IPA.action(spec);
+
+    that.execute_action = function(facet) {
+        var pkey = facet.get_pkey();
+        rpc.command({
+            method: 'session_kill',
+            args: [],
+            options: { user: pkey },
+            on_success: function(data) {
+                var summary = data && data.result && data.result.summary;
+                IPA.notify_success(
+                    summary ||
+                    text.get(
+                        '@i18n:objects.user.force_sign_out',
+                        'Force Sign Out'));
+            }
+        }).execute();
+    };
+
+    return that;
+};
+
+IPA.user.force_sign_out_batch_action = function(spec) {
+
+    spec = spec || {};
+    spec.name = spec.name || 'force_sign_out';
+    spec.label = spec.label || '@i18n:objects.user.force_sign_out';
+    spec.needs_confirm = true;
+    spec.enabled = false;
+    spec.enable_cond = spec.enable_cond || ['item-selected'];
+    spec.hide_cond = spec.hide_cond || ['self-service'];
+    spec.confirm_msg = spec.confirm_msg ||
+        '@i18n:objects.user.force_sign_out_confirm';
+
+    var that = IPA.action(spec);
+
+    that.execute_action = function(facet) {
+        var values = facet.get_selected_values();
+        if (!values || !values.length) {
+            return;
+        }
+        var batch = rpc.batch_command({
+            on_success: function(data) {
+                IPA.notify_success(
+                    text.get(
+                        '@i18n:objects.user.force_sign_out',
+                        'Force Sign Out'));
+                facet.refresh();
+            }
+        });
+        for (var i = 0; i < values.length; i++) {
+            batch.add_command(rpc.command({
+                method: 'session_kill',
+                args: [],
+                options: { user: values[i] }
+            }));
+        }
+        batch.execute();
+    };
+
+    return that;
+};
+
 IPA.user.add_otptoken_action = function(spec) {
 
     spec = spec || {};
@@ -1299,6 +1381,8 @@ exp.register = function() {
     a.register('add_otptoken', IPA.user.add_otptoken_action);
     a.register('delete_active_user', IPA.user.delete_active_user_action);
     a.register('subid_generate', IPA.user.subid_generate_action);
+    a.register('force_sign_out', IPA.user.force_sign_out_action);
+    a.register('force_sign_out_batch', IPA.user.force_sign_out_batch_action);
     d.copy('password', 'user_password', {
         factory: IPA.user.password_dialog,
         pre_ops: [IPA.user.password_dialog_pre_op]

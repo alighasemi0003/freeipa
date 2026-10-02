@@ -408,6 +408,60 @@ class TestSessionCommands:
         assert result['result']['status'] == 'revoked'
         assert not os.path.isfile(ccache)
 
+    def test_session_kill_by_user_revokes_all(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        c1 = _make_ccache(ccache_dir, name='c1')
+        c2 = _make_ccache(ccache_dir, name='c2')
+        sid1 = session_registry.register_web_session(
+            'MagBearerToken=u1a', 'ali2@IPA.TEST', c1, max_per_user=0)
+        sid2 = session_registry.register_web_session(
+            'MagBearerToken=u1b', 'ali2@IPA.TEST', c2, max_per_user=0)
+        other = _make_ccache(ccache_dir, name='c3')
+        session_registry.register_web_session(
+            'MagBearerToken=other', 'other@IPA.TEST', other, max_per_user=0)
+
+        cmd = self._cmd(session_plugin.session_kill)
+        context.principal = 'admin@IPA.TEST'
+        entry = mock.MagicMock()
+        entry.get.return_value = [
+            'cn=admins,cn=groups,cn=accounts,dc=ipa,dc=test'
+        ]
+        cmd.api.Backend.ldap2.get_entry.return_value = entry
+        result = cmd.execute(user='ali2')
+        assert result['value'] == 'ali2'
+        assert result['result']['revoked_count'] == 2
+        assert session_registry.get_session_by_id(sid1)['status'] == 'revoked'
+        assert session_registry.get_session_by_id(sid2)['status'] == 'revoked'
+        assert not os.path.isfile(c1)
+        assert not os.path.isfile(c2)
+        assert os.path.isfile(other)
+
+    def test_session_kill_by_user_noop(self, registry_dir):
+        _reg, _ccache_dir = registry_dir
+        cmd = self._cmd(session_plugin.session_kill)
+        context.principal = 'admin@IPA.TEST'
+        entry = mock.MagicMock()
+        entry.get.return_value = [
+            'cn=admins,cn=groups,cn=accounts,dc=ipa,dc=test'
+        ]
+        cmd.api.Backend.ldap2.get_entry.return_value = entry
+        result = cmd.execute(user='nobody')
+        assert result['result']['revoked_count'] == 0
+        assert 'No active web sessions' in result['summary']
+
+    def test_session_kill_user_requires_admin(self, registry_dir):
+        _reg, ccache_dir = registry_dir
+        ccache = _make_ccache(ccache_dir)
+        session_registry.register_web_session(
+            'MagBearerToken=x', 'ali2@IPA.TEST', ccache)
+        cmd = self._cmd(session_plugin.session_kill)
+        context.principal = 'ali2@IPA.TEST'
+        entry = mock.MagicMock()
+        entry.get.return_value = []
+        cmd.api.Backend.ldap2.get_entry.return_value = entry
+        with pytest.raises(errors.ACIError):
+            cmd.execute(user='ali2')
+
     def test_session_logout_revokes_current(self, registry_dir):
         _reg, ccache_dir = registry_dir
         ccache = _make_ccache(ccache_dir)

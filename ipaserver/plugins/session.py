@@ -128,26 +128,66 @@ class session_find(Command):
 
 @register()
 class session_kill(Command):
-    __doc__ = _('Force logout a FreeIPA Web UI/API session.')
+    __doc__ = _('Force logout FreeIPA Web UI/API session(s).')
 
     takes_args = (
         Str(
-            'id',
+            'id?',
             cli_name='id',
             label=_('Session ID'),
             doc=_('Session identifier from session-find'),
         ),
     )
 
+    takes_options = (
+        Str(
+            'user?',
+            cli_name='user',
+            label=_('User login'),
+            doc=_('Revoke all active Web sessions for this user'),
+        ),
+    )
+
     has_output = (
         output.Output('result', dict, _('Result of kill operation')),
-        output.Output('value', unicode, _('Session ID'), ['no_display']),
+        output.Output('value', unicode,
+                      _('Session ID or user login'), ['no_display']),
         output.Output('summary', (unicode, type(None)),
                       _('User-friendly description of action performed')),
     )
 
-    def execute(self, id, **options):
+    def execute(self, id=None, **options):
         _require_web_session_admin(self.api)
+
+        user = options.get('user')
+        if id and user:
+            raise errors.MutuallyExclusiveError(
+                reason=_('cannot specify both session id and user'))
+        if not id and not user:
+            raise errors.RequirementError(name='id')
+
+        if user:
+            revoked_ids = session_registry.revoke_all_sessions_for_user(user)
+            count = len(revoked_ids)
+            if count == 0:
+                summary = _(
+                    'No active web sessions were found for this user.')
+            elif count == 1:
+                summary = _(
+                    'Signed out 1 web session for user %(user)s') % {
+                        'user': user}
+            else:
+                summary = _(
+                    'Signed out %(count)d web sessions for user %(user)s'
+                ) % {'count': count, 'user': user}
+            return dict(
+                result={
+                    'username': unicode(user),
+                    'revoked_count': count,
+                },
+                value=unicode(user),
+                summary=unicode(summary),
+            )
 
         record = session_registry.get_session_by_id(id)
         if (record is None or
