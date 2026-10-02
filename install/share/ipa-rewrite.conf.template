@@ -8,8 +8,8 @@ RewriteEngine on
 # discards the AllowMethods 405 and continues to auth/WSGI. This rewrite
 # runs inside the SSL VirtualHost (see ssl.conf Include) so it applies to
 # HTTPS. HEAD is kept as GET metadata. TRACE remains TraceEnable Off too.
-RewriteCond %{REQUEST_URI} ^/ipa(/|$)
-RewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)$
+RewriteCond %{REQUEST_URI} ^/ipa(/|$$)
+RewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)$$
 RewriteRule ^ - [R=405,L]
 
 # By default forward all requests to /ipa. If you don't want IPA
