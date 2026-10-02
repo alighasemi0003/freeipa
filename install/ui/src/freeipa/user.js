@@ -993,7 +993,8 @@ IPA.user.force_sign_out_action = function(spec) {
             args: [],
             options: { user: pkey },
             on_success: function(data) {
-                var summary = data && data.result && data.result.summary;
+                var summary = (data && data.summary) ||
+                    (data && data.result && data.result.summary);
                 IPA.notify_success(
                     summary ||
                     text.get(
