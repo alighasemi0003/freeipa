@@ -91,3 +91,21 @@ class TestIpaConfHttpMethods:
         ) in text
         assert 'Content-Security-Policy' in text
         assert "frame-ancestors 'none'" in text
+
+    def test_rewrite_method_gate_in_ssl_vhost_template(self):
+        """Satisfy Any bypasses AllowMethods; rewrite gate must remain."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo = os.path.abspath(os.path.join(here, '..', '..'))
+        path = os.path.join(
+            repo, 'install', 'share', 'ipa-rewrite.conf.template')
+        assert os.path.isfile(path)
+        text = open(path, encoding='utf-8').read()
+        assert 'RewriteCond %{REQUEST_URI} ^/ipa(/|$)' in text
+        assert (
+            'RewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)$' in text
+        )
+        assert re.search(
+            r'(?m)^\s*RewriteRule\s+\^\s+-\s+\[R=405,L\]\s*$', text
+        ), 'R=405 rewrite method gate missing'
+        # VERSION line must be bumped when rewrite semantics change
+        assert re.search(r'(?m)^# VERSION \d+', text)

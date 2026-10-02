@@ -83,10 +83,13 @@ ServerTokens Prod
 
 # Protect /ipa and everything below it in webspace with Apache Kerberos auth
 <Location "/ipa">
-  # Central HTTP method allow-list for the entire /ipa URL space.
+  # Central HTTP method allow-list for the /ipa URL space.
   # FreeIPA only needs GET (UI/static/CAPTCHA) and POST (login/RPC).
-  # PUT/PATCH/DELETE/OPTIONS are rejected at Apache before WSGI.
   # HEAD is not listed: Apache treats HEAD as the metadata form of GET.
+  #
+  # NOTE: Sibling Locations/Directories that set "Satisfy Any" cause Apache
+  # to discard AllowMethods 405 and continue to auth/WSGI. Complementary
+  # early rejection lives in ipa-rewrite.conf (SSL vhost Include).
   AllowMethods GET POST
 
   AuthType GSSAPI

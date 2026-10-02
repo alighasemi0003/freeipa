@@ -1,6 +1,16 @@
-# VERSION 7 - DO NOT REMOVE THIS LINE
+# VERSION 8 - DO NOT REMOVE THIS LINE
 
 RewriteEngine on
+
+# Reject disallowed HTTP methods for /ipa early in the SSL vhost.
+# AllowMethods under <Location "/ipa"> is correct but ineffective for
+# Satisfy Any containers (pre-auth Locations / static Directories): Apache
+# discards the AllowMethods 405 and continues to auth/WSGI. This rewrite
+# runs inside the SSL VirtualHost (see ssl.conf Include) so it applies to
+# HTTPS. HEAD is kept as GET metadata. TRACE remains TraceEnable Off too.
+RewriteCond %{REQUEST_URI} ^/ipa(/|$)
+RewriteCond %{REQUEST_METHOD} !^(GET|POST|HEAD)$
+RewriteRule ^ - [R=405,L]
 
 # By default forward all requests to /ipa. If you don't want IPA
 # to be the default on your web server comment this line out.
