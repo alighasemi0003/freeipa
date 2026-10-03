@@ -210,3 +210,27 @@ ipatests/ipa-test-task
 selinux/tmp
 selinux/*.pp
 selinux/*.pp.bz2
+
+# Local FreeIPA development container (dev-container/)
+/dev-container/.env
+/dev-container/output/
+/dev-container/vendor/
+/dev-container/.build/
+
+# Local/temporary dev-container investigation artifacts (publication)
+/dev-container/.jsvenv/
+/dev-container/hotpatch-captcha/
+/dev-container/scripts/_dbg*
+/dev-container/scripts/_debug*
+/dev-container/scripts/_diag*
+/dev-container/scripts/_probe*
+/dev-container/scripts/_invest*
+/dev-container/scripts/_exp*
+/dev-container/scripts/_surgical*
+/dev-container/scripts/_hotpatch*
+/dev-container/scripts/_final*
+/dev-container/scripts/_commit*
+/dev-container/scripts/_gitpub*
+/dev-container/docker-compose.captcha-hotpatch.yml
+/"
+/; done

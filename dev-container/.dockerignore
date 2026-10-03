@@ -1,0 +1,6 @@
+# Keep docker build context for Dockerfile.builder small.
+.env
+output/
+vendor/
+.build/
+*.md

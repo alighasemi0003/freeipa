@@ -1,0 +1,6 @@
+[local-freeipa]
+name=Local FreeIPA build
+baseurl=file:///tmp/local-rpms
+enabled=1
+gpgcheck=0
+priority=1

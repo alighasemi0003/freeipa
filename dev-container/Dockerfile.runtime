@@ -1,0 +1,13 @@
+# Dockerfile.runtime is produced at build time from the official
+# freeipa-container Dockerfile (see scripts/build-image.sh).
+#
+# Upstream base: Dockerfile.fedora-43 from
+#   https://github.com/freeipa/freeipa-container
+#
+# The generated file keeps the official systemd /data /init stack and only
+# replaces Fedora freeipa-* package installation with a local createrepo
+# that serves RPMs built from this repository's source tree.
+#
+# Do not maintain a hand-copied fork of the upstream Dockerfile here.
+# Running ./scripts/build-image.sh (or ./up.sh / ./rebuild.sh) regenerates it
+# under .build/runtime/Dockerfile.local-rpms (gitignored).

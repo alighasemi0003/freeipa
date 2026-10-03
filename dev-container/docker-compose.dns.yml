@@ -1,0 +1,7 @@
+# Optional override when IPA_ENABLE_DNS=true (loaded by scripts/common.sh).
+# Publishes DNS ports required by FreeIPA integrated BIND.
+services:
+  freeipa:
+    ports:
+      - "${DNS_PORT:-53}:53"
+      - "${DNS_PORT:-53}:53/udp"
